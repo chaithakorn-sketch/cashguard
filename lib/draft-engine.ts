@@ -30,6 +30,18 @@ export async function ensureDraft(payerId: string, branchId: string | null) {
   return d;
 }
 
+/**
+ * Get the payer's in-progress (incomplete) basket, or open a fresh one.
+ * A basket that already has amount + receipt is "done, awaiting confirm" — a new
+ * bill must NOT merge into it, so we start a new basket instead of reusing it.
+ * (Multi-page: extra photos before the amount still land in the same basket.)
+ */
+export async function draftForNewInput(payerId: string, branchId: string | null) {
+  const open = await openDraft(payerId);
+  if (open && !(await isReady(open))) { await touch(open.id); return open; }
+  return newDraft(payerId, branchId);
+}
+
 export async function touch(id: string) {
   const expires = new Date(Date.now() + TIMEOUT_MIN * 60_000).toISOString();
   await sb.from('entries').update({ basket_expires: expires, updated_at: new Date().toISOString() }).eq('id', id);
@@ -69,17 +81,19 @@ export async function isReady(entry: any): Promise<boolean> {
  */
 export async function sweepExpired() {
   const now = new Date().toISOString();
-  const { data: expired } = await sb.from('entries').select('*').eq('status', 'draft').lt('basket_expires', now);
-  const result = { pending_evidence: 0, pending_amount: 0, rejected: 0 };
-  for (const e of expired ?? []) {
+  const expired = unwrap(
+    await sb.from('entries').select('*').eq('status', 'draft').lt('basket_expires', now),
+    'sweepExpired.fetch'
+  ) ?? [];
+  const result = { pending_evidence: 0, pending_amount: 0, rejected: 0, remind: [] as any[] };
+  for (const e of expired) {
     const rc = await receiptCount(e.id);
-    let next: string;
+    if (e.amount != null && rc >= 1) { result.remind.push(e); continue; } // ready-but-unconfirmed -> nudge, keep as draft
+    let next: 'pending_evidence' | 'pending_amount' | 'rejected';
     if (e.amount != null && rc === 0) next = 'pending_evidence';
     else if (e.amount == null && rc > 0) next = 'pending_amount';
-    else if (e.amount == null && rc === 0) next = 'rejected';
-    else continue; // ready-but-unconfirmed: leave for now
-    await sb.from('entries').update({ status: next }).eq('id', e.id);
-    // @ts-ignore
+    else next = 'rejected'; // abandoned (no amount, no receipt)
+    unwrap(await sb.from('entries').update({ status: next }).eq('id', e.id), 'sweepExpired.update');
     result[next]++;
   }
   return result;

@@ -6,6 +6,14 @@ import { getProfile } from './line';
  * name + the branch of the group they posted in. Returns the employee row.
  * (Auto-register is acceptable because branch groups are controlled/invite-only.)
  */
+/** Look up an employee by LINE user id WITHOUT creating one (for chit-chat gating). */
+export async function findEmployee(userId: string) {
+  return unwrap(
+    await sb.from('employees').select('*').eq('line_user_id', userId).maybeSingle(),
+    'findEmployee'
+  );
+}
+
 export async function findOrRegister(userId: string, branchId: string | null, groupId?: string) {
   const existing = unwrap(
     await sb.from('employees').select('*').eq('line_user_id', userId).maybeSingle(),
