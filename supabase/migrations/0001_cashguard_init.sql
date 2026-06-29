@@ -1,0 +1,3 @@
+-- Applied to Supabase project uwniugxetyikjzkobifp (schema cashguard).
+-- Tables: branches, employees, entries, receipts, flags, audit_log, reconciliations
+-- + view employee_balances. Kept here for version control reference.
