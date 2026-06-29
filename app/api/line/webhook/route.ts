@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifySignature, reply, push, getMessageContent, flexMessage } from '@/lib/line';
-import { sb } from '@/lib/supabase';
+import { sb, unwrap } from '@/lib/supabase';
 import { ensureDraft, attachReceipt, setAmount, isReady, touch } from '@/lib/draft-engine';
 import { computeFlags } from '@/lib/flags';
 import { balanceFor } from '@/lib/ledger';
@@ -88,8 +88,10 @@ async function handleMessage(ev: any) {
 }
 
 async function maybeConfirm(ev: any, entryId: string) {
-  const { data: e } = await sb.from('entries').select('*').eq('id', entryId).single();
-  if (await isReady(e)) {
+  const e = unwrap(await sb.from('entries').select('*').eq('id', entryId).single(), 'maybeConfirm.fetch');
+  const ready = await isReady(e);
+  console.log(`[maybeConfirm] entry=${entryId} amount=${e.amount} ocr_verified=${e.ocr_verified} ready=${ready}`);
+  if (ready) {
     const ocrOk = e.ocr_verified && e.ocr_amount != null &&
       Math.abs(Number(e.amount) - Number(e.ocr_amount)) <= Math.max(5, Number(e.ocr_amount) * 0.02);
     if (e.ocr_verified && e.ocr_amount != null && !ocrOk) {
@@ -149,11 +151,11 @@ async function confirmEntry(ev: any, id: string, opts: { allowDuplicate?: boolea
   const flags = await computeFlags(e);
   const filtered = opts.allowDuplicate ? flags.filter(f => f.kind !== 'duplicate') : flags;
 
-  const { data: status } = await sb.rpc('confirm_entry', {
+  const status = unwrap(await sb.rpc('confirm_entry', {
     p_entry_id: id,
     p_flags: filtered,
     p_actor: e.payer_id ?? 'system',
-  });
+  }), 'confirm_entry.rpc');
 
   const bal = await balanceFor(e.payer_id);
 

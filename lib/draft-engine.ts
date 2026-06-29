@@ -1,4 +1,4 @@
-import { sb } from './supabase';
+import { sb, unwrap } from './supabase';
 
 const TIMEOUT_MIN = Number(process.env.BASKET_TIMEOUT_MINUTES || 10);
 
@@ -14,10 +14,12 @@ export async function openDraft(payerId: string) {
 /** Open a fresh basket (called when first photo or amount arrives). */
 export async function newDraft(payerId: string, branchId: string | null) {
   const expires = new Date(Date.now() + TIMEOUT_MIN * 60_000).toISOString();
-  const { data } = await sb.from('entries')
-    .insert({ type: 'expense', status: 'draft', payer_id: payerId, branch_id: branchId, basket_expires: expires })
-    .select('*').single();
-  return data;
+  return unwrap(
+    await sb.from('entries')
+      .insert({ type: 'expense', status: 'draft', payer_id: payerId, branch_id: branchId, basket_expires: expires })
+      .select('*').single(),
+    'newDraft.insert'
+  );
 }
 
 /** Ensure a draft exists for this payer; extend the timeout window. */
@@ -35,16 +37,16 @@ export async function touch(id: string) {
 
 /** Attach a receipt (already uploaded to storage) to the draft. */
 export async function attachReceipt(entryId: string, imageUrl: string, phash: string | null, ocrRaw: any, ocrAmount: number | null, evidenceType: string) {
-  await sb.from('receipts').insert({ entry_id: entryId, image_url: imageUrl, phash, ocr_raw: ocrRaw });
+  unwrap(await sb.from('receipts').insert({ entry_id: entryId, image_url: imageUrl, phash, ocr_raw: ocrRaw }), 'attachReceipt.insertReceipt');
   const patch: any = { evidence_type: evidenceType, updated_at: new Date().toISOString() };
   if (ocrAmount != null) { patch.ocr_amount = ocrAmount; patch.ocr_verified = true; }
-  await sb.from('entries').update(patch).eq('id', entryId);
+  unwrap(await sb.from('entries').update(patch).eq('id', entryId), 'attachReceipt.updateEntry');
   await touch(entryId);
 }
 
 /** Set the typed amount / category / vendor on the draft. */
 export async function setAmount(entryId: string, fields: { amount?: number; category?: string; vendor?: string; description?: string }) {
-  await sb.from('entries').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', entryId);
+  unwrap(await sb.from('entries').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', entryId), 'setAmount.update');
   await touch(entryId);
 }
 

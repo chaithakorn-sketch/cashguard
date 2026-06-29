@@ -15,10 +15,10 @@ function header(color: string, icon: string, status: string, amount?: string, su
     type:'box', layout:'horizontal', alignItems:'center',
     contents:[
       { type:'box', layout:'horizontal', flex:1, spacing:'sm', alignItems:'center', contents:[
-        { type:'image', url:iw(icon), width:'20px', aspectMode:'fit', flex:0 },
+        { type:'image', url:iw(icon), size:'20px', aspectMode:'fit', flex:0 },
         { type:'text', text:status, color:'#FFFFFF', weight:'bold', size:'sm', gravity:'center', wrap:false }
       ]},
-      { type:'image', url:LOGO, width:'26px', aspectMode:'fit', flex:0 }
+      { type:'image', url:LOGO, size:'26px', aspectMode:'fit', flex:0 }
     ]
   }];
   if (amount) contents.push({ type:'text', text:amount, color:'#FFFFFF', weight:'bold', size:'3xl', margin:'sm' });
@@ -29,7 +29,7 @@ function header(color: string, icon: string, status: string, amount?: string, su
 function row(icon: string, label: string, value: string, vcolor=VAL) {
   return { type:'box', layout:'horizontal', alignItems:'center', margin:'md', contents:[
     { type:'box', layout:'horizontal', flex:1, spacing:'sm', alignItems:'center', contents:[
-      { type:'image', url:ig(icon), width:'16px', aspectMode:'fit', flex:0 },
+      { type:'image', url:ig(icon), size:'16px', aspectMode:'fit', flex:0 },
       { type:'text', text:label, size:'sm', color:GRAY, gravity:'center', wrap:false }
     ]},
     { type:'text', text:value, size:'sm', weight:'bold', color:vcolor, align:'end', gravity:'center', wrap:false }
@@ -40,7 +40,7 @@ function balance(label: string, value: string, vcolor=VAL) {
   return { type:'box', layout:'horizontal', backgroundColor:'#F5F5F7', cornerRadius:'10px',
     paddingAll:'12px', margin:'lg', alignItems:'center', contents:[
     { type:'box', layout:'horizontal', flex:1, spacing:'sm', alignItems:'center', contents:[
-      { type:'image', url:ig('wallet'), width:'16px', aspectMode:'fit', flex:0 },
+      { type:'image', url:ig('wallet'), size:'16px', aspectMode:'fit', flex:0 },
       { type:'text', text:label, size:'xs', color:GRAY, gravity:'center' }
     ]},
     { type:'text', text:value, size:'lg', weight:'bold', color:vcolor, align:'end', gravity:'center' }

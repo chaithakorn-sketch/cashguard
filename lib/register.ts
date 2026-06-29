@@ -1,4 +1,4 @@
-import { sb } from './supabase';
+import { sb, unwrap } from './supabase';
 import { getProfile } from './line';
 
 /**
@@ -7,13 +7,19 @@ import { getProfile } from './line';
  * (Auto-register is acceptable because branch groups are controlled/invite-only.)
  */
 export async function findOrRegister(userId: string, branchId: string | null, groupId?: string) {
-  const { data: existing } = await sb.from('employees').select('*').eq('line_user_id', userId).maybeSingle();
+  const existing = unwrap(
+    await sb.from('employees').select('*').eq('line_user_id', userId).maybeSingle(),
+    'findOrRegister.lookup'
+  );
   if (existing) return { employee: existing, justRegistered: false };
 
   const profile = await getProfile(userId, groupId);
   const name = profile?.displayName ?? 'พนักงานใหม่';
-  const { data: created } = await sb.from('employees')
-    .insert({ line_user_id: userId, name, nickname: name, branch_id: branchId, status: 'active' })
-    .select('*').single();
+  const created = unwrap(
+    await sb.from('employees')
+      .insert({ line_user_id: userId, name, nickname: name, branch_id: branchId, status: 'active' })
+      .select('*').single(),
+    'findOrRegister.insert'
+  );
   return { employee: created, justRegistered: true };
 }

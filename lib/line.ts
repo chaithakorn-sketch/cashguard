@@ -12,19 +12,31 @@ export function verifySignature(rawBody: string, signature: string | null): bool
 }
 
 export async function reply(replyToken: string, messages: any[]) {
-  await fetch(`${API}/message/reply`, {
+  const res = await fetch(`${API}/message/reply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify({ replyToken, messages }),
   });
+  // LINE silently 400s a whole message when e.g. a Flex node or image URL is invalid.
+  // Surface it instead of swallowing (this hid the missing confirm card).
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    console.error(`[line] reply failed ${res.status}: ${detail}`);
+  }
+  return res;
 }
 
 export async function push(to: string, messages: any[]) {
-  await fetch(`${API}/message/push`, {
+  const res = await fetch(`${API}/message/push`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify({ to, messages }),
   });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    console.error(`[line] push failed ${res.status}: ${detail}`);
+  }
+  return res;
 }
 
 export async function getMessageContent(messageId: string): Promise<{ buf: Buffer; contentType: string }> {
