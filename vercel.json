@@ -1,12 +1,6 @@
 {
   "crons": [
-    {
-      "path": "/api/cron/sweep-baskets",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/daily",
-      "schedule": "0 12 * * *"
-    }
+    { "path": "/api/cron/sweep-baskets", "schedule": "0 12 * * *" },
+    { "path": "/api/cron/daily", "schedule": "0 12 * * *" }
   ]
 }
