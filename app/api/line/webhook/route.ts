@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifySignature, reply, getMessageContent, flexMessage } from '@/lib/line';
+import { verifySignature, reply, push, getMessageContent, flexMessage } from '@/lib/line';
 import { sb } from '@/lib/supabase';
-import { ensureDraft, attachReceipt, setAmount, isReady } from '@/lib/draft-engine';
-import { computeFlags, saveFlags } from '@/lib/flags';
+import { ensureDraft, attachReceipt, setAmount, isReady, touch } from '@/lib/draft-engine';
+import { computeFlags } from '@/lib/flags';
 import { balanceFor } from '@/lib/ledger';
 import { runOcr } from '@/lib/ocr';
 import { pHash, findDuplicate } from '@/lib/phash';
+import { uploadReceipt } from '@/lib/storage';
+import { parseText } from '@/lib/parse';
+import { findOrRegister } from '@/lib/register';
 import * as flex from '@/lib/flex';
 
 export const runtime = 'nodejs';
@@ -16,7 +19,6 @@ export async function POST(req: NextRequest) {
     return new NextResponse('bad signature', { status: 401 });
   }
   const body = JSON.parse(raw);
-  // Respond 200 fast; process events (LINE retries on non-200).
   for (const ev of body.events ?? []) {
     try { await handleEvent(ev); } catch (e) { console.error('event error', e); }
   }
@@ -29,56 +31,60 @@ async function resolveBranch(ev: any) {
   const { data } = await sb.from('branches').select('*').eq('line_group_id', gid).maybeSingle();
   return data;
 }
-async function resolveEmployee(userId: string) {
-  const { data } = await sb.from('employees').select('*').eq('line_user_id', userId).maybeSingle();
-  return data;
-}
 
 async function handleEvent(ev: any) {
   if (ev.type === 'message') return handleMessage(ev);
   if (ev.type === 'postback') return handlePostback(ev);
 }
 
+// ---------------------------------------------------------------- messages
 async function handleMessage(ev: any) {
   const userId = ev.source?.userId;
   if (!userId) return;
-  const emp = await resolveEmployee(userId);
-  if (!emp) {
-    // Unknown sender — prompt one-time registration (TODO: registration flow)
-    return reply(ev.replyToken, [{ type: 'text', text: 'ยังไม่พบข้อมูลพนักงาน กรุณาลงทะเบียนก่อนใช้งานครับ' }]);
-  }
   const branch = await resolveBranch(ev);
+  const { employee: emp, justRegistered } = await findOrRegister(userId, branch?.id ?? null, ev.source?.groupId);
+  if (!emp) return;
+  if (justRegistered) {
+    await push(userId, [{ type: 'text', text: `ลงทะเบียนให้แล้วครับ: ${emp.name}${branch ? ' · ' + branch.name : ''}\nส่งบิล (รูป + ยอด) ได้เลย` }]);
+  }
+
   const draft = await ensureDraft(emp.id, branch?.id ?? emp.branch_id);
 
   if (ev.message.type === 'image') {
-    const img = await getMessageContent(ev.message.id);
-    // TODO: upload img to Supabase Storage -> imageUrl
-    const imageUrl = 'storage://pending'; // placeholder until storage wired
-    const hash = await pHash(img);
+    const { buf, contentType } = await getMessageContent(ev.message.id);
+
+    const hash = await pHash(buf);
     const dup = await findDuplicate(hash);
     if (dup) {
-      return reply(ev.replyToken, [flexMessage('ตรวจพบรูปซ้ำ',
-        flex.flexRejectedDuplicate({ id: draft.id, amount: draft.amount ?? 0, prevDate: '-', prevBy: '-', prevItem: '-' }))]);
+      const prev: any = (dup as any).entries;
+      return reply(ev.replyToken, [flexMessage('ตรวจพบรูปซ้ำ', flex.flexRejectedDuplicate({
+        id: draft.id,
+        amount: draft.amount ?? prev?.amount ?? 0,
+        prevDate: prev?.submitted_at ? new Date(prev.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '-',
+        prevBy: '-',
+        prevItem: prev?.vendor ?? prev?.description ?? '-',
+      }))]);
     }
-    const ocr = await runOcr(img);
-    await attachReceipt(draft.id, imageUrl, hash, ocr.raw, ocr.amount, ocr.evidenceType);
+
+    const path = await uploadReceipt(draft.id, buf, contentType);
+    const ocr = await runOcr(buf);
+    await attachReceipt(draft.id, path, hash, ocr.raw, ocr.amount, ocr.evidenceType);
+    if (ocr.vendor) await setAmount(draft.id, { vendor: ocr.vendor });
     return maybeConfirm(ev, draft.id);
   }
 
   if (ev.message.type === 'text') {
-    const parsed = parseText(ev.message.text);
-    if (parsed.amount == null && !parsed.vendor && !parsed.category) return; // chit-chat, ignore
-    await setAmount(draft.id, parsed);
+    const parsed = await parseText(ev.message.text);
+    if (parsed.amount == null && !parsed.vendor && !parsed.category_code) return; // chit-chat
+    await setAmount(draft.id, {
+      amount: parsed.amount,
+      vendor: parsed.vendor,
+      category: parsed.category_name,
+      category_code: parsed.category_code,
+      description: parsed.description,
+    } as any);
     return maybeConfirm(ev, draft.id);
   }
-}
-
-/** Very small parser: pulls the first number as amount; rest as description. */
-function parseText(text: string): { amount?: number; vendor?: string; category?: string; description?: string } {
-  const m = text.replace(/,/g, '').match(/(\d+(?:\.\d{1,2})?)/);
-  const amount = m ? Number(m[1]) : undefined;
-  const desc = text.replace(/(\d+(?:\.\d{1,2})?)/, '').trim();
-  return { amount, description: desc || undefined };
 }
 
 async function maybeConfirm(ev: any, entryId: string) {
@@ -86,43 +92,85 @@ async function maybeConfirm(ev: any, entryId: string) {
   if (await isReady(e)) {
     const ocrOk = e.ocr_verified && e.ocr_amount != null &&
       Math.abs(Number(e.amount) - Number(e.ocr_amount)) <= Math.max(5, Number(e.ocr_amount) * 0.02);
-    return reply(ev.replyToken, [flexMessage('ยืนยันรายการ',
-      flex.flexDraftConfirm({ id: e.id, amount: Number(e.amount), vendor: e.vendor ?? 'ไม่ระบุ', category: e.category ?? 'อื่นๆ', ocrOk }))]);
+    if (e.ocr_verified && e.ocr_amount != null && !ocrOk) {
+      return reply(ev.replyToken, [flexMessage('ยอดไม่ตรงบิล',
+        flex.flexOcrMismatch({ id: e.id, typed: Number(e.amount), ocr: Number(e.ocr_amount) }))]);
+    }
+    return reply(ev.replyToken, [flexMessage('ยืนยันรายการ', flex.flexDraftConfirm({
+      id: e.id, amount: Number(e.amount), vendor: e.vendor ?? 'ไม่ระบุ', category: e.category ?? 'อื่นๆ', ocrOk,
+    }))]);
   }
-  // still incomplete -> gentle ack
   const need = e.amount == null ? 'พิมพ์ยอดด้วยนะครับ' : 'รอแนบบิลด้วยนะครับ';
   return reply(ev.replyToken, [{ type: 'text', text: `รับแล้ว · ${need}` }]);
 }
 
+// ---------------------------------------------------------------- postbacks
 async function handlePostback(ev: any) {
   const params = new URLSearchParams(ev.postback.data);
   const action = params.get('action');
   const id = params.get('id');
-  if (!id) return;
-  const { data: e } = await sb.from('entries').select('*').eq('id', id).single();
-  if (!e) return;
-  const { data: emp } = await sb.from('employees').select('*').eq('id', e.payer_id).single();
-  const { data: br } = await sb.from('branches').select('*').eq('id', e.branch_id).maybeSingle();
-
-  if (action === 'confirm') {
-    const flags = await computeFlags(e);
-    const status = flags.length ? 'flagged' : 'confirmed';
-    await sb.from('entries').update({ status, spent_at: e.spent_at ?? e.submitted_at }).eq('id', id);
-    await saveFlags(id, flags);
-    const bal = await balanceFor(e.payer_id);
-    if (status === 'confirmed') {
-      return reply(ev.replyToken, [flexMessage('บันทึกแล้ว', flex.flexExpenseSuccess({
-        amount: Number(e.amount), vendor: e.vendor ?? 'ไม่ระบุ', category: e.category ?? 'อื่นๆ',
-        payer: emp?.nickname ?? emp?.name ?? '-', branch: br?.name ?? '-', balance: bal,
-        when: new Date().toLocaleString('th-TH', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) })));
-    }
-    // flagged -> notify + (TODO) push to ADMIN_GROUP_ID
-    return reply(ev.replyToken, [flexMessage('รอตรวจสอบ', flex.flexFlagged({
-      amount: Number(e.amount), item: e.description ?? e.vendor ?? '-', reason: flags[0].detail,
-      evidence: e.evidence_type === 'none' ? 'ไม่มีบิล' : 'มีบิล', who: emp?.nickname ?? '-', balance: bal })));
+  if (!id) {
+    if (action === 'topup_urgent') return reply(ev.replyToken, [{ type: 'text', text: 'แจ้งฝ่ายบัญชีเติมเงินด่วนแล้วครับ' }]);
+    return;
   }
 
-  // other actions: split / add_photo / second_installment / retake / use_ocr / use_typed / attach_now / topup_urgent
-  // TODO: implement each. For now acknowledge.
-  return reply(ev.replyToken, [{ type: 'text', text: `รับคำสั่ง: ${action}` }]);
+  switch (action) {
+    case 'confirm':
+      return confirmEntry(ev, id);
+    case 'use_ocr': {
+      const { data: e } = await sb.from('entries').select('ocr_amount').eq('id', id).single();
+      if (e?.ocr_amount != null) await setAmount(id, { amount: Number(e.ocr_amount) });
+      return confirmEntry(ev, id);
+    }
+    case 'use_typed':
+      return confirmEntry(ev, id);
+    case 'second_installment':
+      return confirmEntry(ev, id, { allowDuplicate: true });
+    case 'add_photo':
+    case 'attach_now':
+      await touch(id);
+      return reply(ev.replyToken, [{ type: 'text', text: 'ส่งรูปบิลเพิ่มได้เลยครับ' }]);
+    case 'retake':
+      await sb.from('entries').update({ status: 'rejected' }).eq('id', id);
+      return reply(ev.replyToken, [{ type: 'text', text: 'ยกเลิกรายการนี้แล้ว ถ่ายบิลใบจริงส่งใหม่ได้เลยครับ' }]);
+    case 'split':
+      return reply(ev.replyToken, [{ type: 'text', text: 'โหมดแยกรายการ: ส่งบิลทีละใบ พร้อมยอดของใบนั้นได้เลยครับ' }]);
+    default:
+      return reply(ev.replyToken, [{ type: 'text', text: `รับคำสั่ง: ${action}` }]);
+  }
+}
+
+async function confirmEntry(ev: any, id: string, opts: { allowDuplicate?: boolean } = {}) {
+  const { data: e } = await sb.from('entries').select('*').eq('id', id).single();
+  if (!e) return;
+  const { data: emp } = await sb.from('employees').select('*').eq('id', e.payer_id).maybeSingle();
+  const { data: br } = await sb.from('branches').select('*').eq('id', e.branch_id).maybeSingle();
+
+  const flags = await computeFlags(e);
+  const filtered = opts.allowDuplicate ? flags.filter(f => f.kind !== 'duplicate') : flags;
+
+  const { data: status } = await sb.rpc('confirm_entry', {
+    p_entry_id: id,
+    p_flags: filtered,
+    p_actor: e.payer_id ?? 'system',
+  });
+
+  const bal = await balanceFor(e.payer_id);
+
+  if (status === 'confirmed') {
+    return reply(ev.replyToken, [flexMessage('บันทึกแล้ว', flex.flexExpenseSuccess({
+      amount: Number(e.amount), vendor: e.vendor ?? 'ไม่ระบุ', category: e.category ?? 'อื่นๆ',
+      payer: emp?.nickname ?? emp?.name ?? '-', branch: br?.name ?? '-', balance: bal,
+      when: new Date().toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+    }))]);
+  }
+
+  const flaggedCard = flexMessage('รอตรวจสอบ', flex.flexFlagged({
+    amount: Number(e.amount), item: e.description ?? e.vendor ?? '-',
+    reason: filtered[0]?.detail ?? 'ตรวจสอบ',
+    evidence: e.evidence_type === 'none' ? 'ไม่มีบิล' : 'มีบิล',
+    who: emp?.nickname ?? '-', balance: bal,
+  }));
+  await reply(ev.replyToken, [flaggedCard]);
+  if (process.env.ADMIN_GROUP_ID) await push(process.env.ADMIN_GROUP_ID, [flaggedCard]);
 }
