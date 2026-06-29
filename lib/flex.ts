@@ -21,7 +21,7 @@ function header(color: string, icon: string, status: string, amount?: string, su
       { type:'image', url:LOGO, size:'26px', aspectMode:'fit', flex:0 }
     ]
   }];
-  if (amount) contents.push({ type:'text', text:amount, color:'#FFFFFF', weight:'bold', size:'3xl', margin:'sm' });
+  if (amount) contents.push({ type:'text', text:amount, color:'#FFFFFF', weight:'bold', size:'3xl', margin:'xs' });
   if (sub)    contents.push({ type:'text', text:sub, color:'#FFFFFFCC', size:'xs', margin:'xs' });
   return { type:'box', layout:'vertical', backgroundColor:color,
     paddingTop:'18px', paddingBottom:'18px', paddingStart:'20px', paddingEnd:'20px', contents };
@@ -52,10 +52,13 @@ function body(rows: any[], extra?: any) {
   if (extra) c.push(extra);
   return { type:'box', layout:'vertical', paddingAll:'16px', contents:c };
 }
-const pbtn = (label:string,color:string,data:string)=>({ type:'button', style:'primary', color, height:'sm',
+const pbtn = (label:string,color:string,data:string)=>({ type:'button', style:'primary', color, height:'sm', flex:1,
   action:{ type:'postback', label, data, displayText:label }});
-const sbtn = (label:string,data:string)=>({ type:'button', style:'secondary', height:'sm',
-  action:{ type:'postback', label, data, displayText:label }});
+// Secondary = white pill with a thin near-black outline (Apple-style), not the gray box.
+const sbtn = (label:string,data:string)=>({ type:'box', layout:'vertical', flex:1,
+  backgroundColor:'#FFFFFF', borderColor:'#1C1C1E', borderWidth:'1px', cornerRadius:'8px',
+  contents:[{ type:'button', style:'link', color:'#1C1C1E', height:'sm',
+    action:{ type:'postback', label, data, displayText:label }}]});
 const btnRow = (b:any[])=>({ type:'box', layout:'horizontal', spacing:'sm', margin:'lg', contents:b });
 const bubble = (h:any,b:any)=>({ type:'bubble', size:'mega', header:h, body:b });
 
