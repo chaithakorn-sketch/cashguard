@@ -50,12 +50,19 @@ export function hamming(a: string, b: string): number {
   return d;
 }
 
-/** Find an existing receipt whose hash is within `threshold` Hamming distance. */
-export async function findDuplicate(hash: string | null, threshold = 6) {
+/**
+ * Find an existing receipt whose hash is within `threshold` Hamming distance.
+ * Only looks back `windowDays` — an identical-looking receipt from months ago is
+ * almost always a same-template coincidence (7-Eleven slips etc.), not a re-submit,
+ * so limiting the window cuts false positives while still catching real re-sends.
+ */
+export async function findDuplicate(hash: string | null, threshold = 6, windowDays = 60) {
   if (!hash) return null;
+  const since = new Date(Date.now() - windowDays * 86400_000).toISOString();
   const { data } = await sb.from('receipts')
     .select('id, entry_id, phash, uploaded_at, entries(id, amount, vendor, description, payer_id, status, submitted_at)')
-    .not('phash', 'is', null);
+    .not('phash', 'is', null)
+    .gte('uploaded_at', since);
   for (const r of data ?? []) {
     if (r.phash && hamming(hash, r.phash) <= threshold) return r;
   }

@@ -56,9 +56,11 @@ export async function computeFlags(entry: any, opts: { duplicateOf?: any } = {})
       flags.push({ kind: 'cross_branch', detail: 'จ่ายแทนสาขาอื่น' });
   }
 
-  // 7) off-hours (outside 08:00–20:00 ICT)
+  // 7) off-hours (outside store hours ICT). Widened from 08–20 so staff buying
+  //    things right after closing (~20:30) aren't flagged every night.
+  const OPEN_HR = 6, CLOSE_HR = 23;
   const localHr = (((new Date(entry.submitted_at).getUTCHours() + 7) % 24) + 24) % 24;
-  if (localHr < 8 || localHr >= 20) flags.push({ kind: 'off_hours', detail: 'ส่งนอกเวลางาน' });
+  if (localHr < OPEN_HR || localHr >= CLOSE_HR) flags.push({ kind: 'off_hours', detail: 'ส่งนอกเวลางาน' });
 
   return flags;
 }

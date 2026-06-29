@@ -60,7 +60,9 @@ const sbtn = (label:string,data:string)=>({ type:'box', layout:'vertical', flex:
   contents:[{ type:'button', style:'link', color:'#1C1C1E', height:'sm',
     action:{ type:'postback', label, data, displayText:label }}]});
 const btnRow = (b:any[])=>({ type:'box', layout:'horizontal', spacing:'sm', margin:'lg', contents:b });
-const bubble = (h:any,b:any)=>({ type:'bubble', size:'mega', header:h, body:b });
+const bubble = (h:any,b:any,f?:any)=>{ const o:any={ type:'bubble', size:'mega', header:h, body:b }; if (f) o.footer=f; return o; };
+// Footer with a single outlined "undo" button — lets the payer fix a mistake after saving.
+const voidFooter = (id:string)=>({ type:'box', layout:'vertical', paddingAll:'12px', contents:[ sbtn('ยกเลิก / แก้ไข', `action=void&id=${id}`) ]});
 
 // ---- public builders ----
 export function flexDraftConfirm(e:{id:string, amount:number, vendor:string, category:string, ocrOk:boolean}) {
@@ -77,14 +79,24 @@ export function flexDraftConfirm(e:{id:string, amount:number, vendor:string, cat
     ]))
   );
 }
-export function flexExpenseSuccess(e:{amount:number, vendor:string, category:string, payer:string, branch:string, balance:number, when:string}) {
+export function flexExpenseSuccess(e:{id:string, amount:number, vendor:string, category:string, payer:string, branch:string, balance:number, when:string}) {
   return bubble(
     header(C.green,'check','บันทึกค่าใช้จ่ายแล้ว', baht(e.amount), e.when),
     body([
       row('store','ร้าน', e.vendor),
       row('tag','หมวด', e.category),
       row('user','ผู้จ่าย', `${e.payer} · ${e.branch}`),
-    ], balance('เงินคงเหลือในมือ', baht(e.balance)))
+    ], balance('เงินคงเหลือในมือ', baht(e.balance))),
+    voidFooter(e.id)
+  );
+}
+export function flexTopupConfirm(e:{id:string, amount:number}) {
+  return bubble(
+    header(C.green,'in','ยืนยันเติมเงินสดย่อย?', baht(e.amount), 'ตรวจยอดก่อนบันทึก'),
+    body([ row('wallet','ประเภท', 'เติมเงินเข้ากล่อง') ], btnRow([
+      pbtn('ยืนยัน', C.green, `action=confirm&id=${e.id}`),
+      sbtn('ยกเลิก', `action=retake&id=${e.id}`),
+    ]))
   );
 }
 export function flexTopup(e:{amount:number, payer:string, branch:string, balance:number, round:string}) {
@@ -101,14 +113,15 @@ export function flexCustomerRefund(e:{amount:number, reason:string, by:string, b
       balance('เงินคงเหลือในมือ', baht(e.balance)))
   );
 }
-export function flexFlagged(e:{amount:number, item:string, reason:string, evidence:string, who:string, balance:number}) {
+export function flexFlagged(e:{id:string, amount:number, item:string, reason:string, evidence:string, who:string, balance:number}) {
   return bubble(
     header(C.orange,'warn','บันทึกแล้ว · รอตรวจสอบ', baht(e.amount), 'ส่งให้ผู้บริหารดูแล้ว'),
     body([
       row('out','รายการ', e.item),
       row('warn','เหตุผล', e.reason, WARN),
       row('doc','หลักฐาน', e.evidence, WARN),
-    ], balance(`เงินคงเหลือ ${e.who}`, baht(e.balance)))
+    ], balance(`เงินคงเหลือ ${e.who}`, baht(e.balance))),
+    voidFooter(e.id)
   );
 }
 export function flexRejectedDuplicate(e:{id:string, amount:number, prevDate:string, prevBy:string, prevItem:string}) {

@@ -2,11 +2,12 @@ import { sb, unwrap } from './supabase';
 
 const TIMEOUT_MIN = Number(process.env.BASKET_TIMEOUT_MINUTES || 10);
 
-/** Get the employee's currently-open draft basket, or null. */
+/** Get the employee's currently-open expense draft basket, or null.
+ *  (type='expense' so a pending top-up draft never gets reused for a bill.) */
 export async function openDraft(payerId: string) {
   const { data } = await sb.from('entries')
     .select('*')
-    .eq('payer_id', payerId).eq('status', 'draft')
+    .eq('payer_id', payerId).eq('status', 'draft').eq('type', 'expense')
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
   return data;
 }
@@ -40,6 +41,16 @@ export async function draftForNewInput(payerId: string, branchId: string | null)
   const open = await openDraft(payerId);
   if (open && !(await isReady(open))) { await touch(open.id); return open; }
   return newDraft(payerId, branchId);
+}
+
+/** Record a cash top-up (cash added to the float). No receipt/basket — confirmed on tap. */
+export async function newTopup(payerId: string, branchId: string | null, amount: number) {
+  return unwrap(
+    await sb.from('entries')
+      .insert({ type: 'topup', status: 'draft', payer_id: payerId, branch_id: branchId, amount })
+      .select('*').single(),
+    'newTopup.insert'
+  );
 }
 
 export async function touch(id: string) {
@@ -82,7 +93,7 @@ export async function isReady(entry: any): Promise<boolean> {
 export async function sweepExpired() {
   const now = new Date().toISOString();
   const expired = unwrap(
-    await sb.from('entries').select('*').eq('status', 'draft').lt('basket_expires', now),
+    await sb.from('entries').select('*').eq('status', 'draft').eq('type', 'expense').lt('basket_expires', now),
     'sweepExpired.fetch'
   ) ?? [];
   const result = { pending_evidence: 0, pending_amount: 0, rejected: 0, remind: [] as any[] };

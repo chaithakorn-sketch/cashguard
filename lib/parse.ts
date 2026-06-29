@@ -49,7 +49,7 @@ export function extractAmount(text: string): number | undefined {
   while ((m = re.exec(t))) {
     const raw = m[0];
     const n = Number(raw);
-    if (!isFinite(n) || n <= 0) continue;
+    if (!isFinite(n) || n <= 0 || n >= 1_000_000) continue;             // 0/neg or absurd (petty cash)
     if (/^\d{9,}$/.test(raw)) continue;                                  // phone-like
     const before = t[m.index - 1] ?? '';
     const after = t.slice(m.index + raw.length, m.index + raw.length + 8);
