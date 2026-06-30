@@ -1,9 +1,9 @@
 // OCR adapter — reads amount / vendor / VAT / evidence-type from a receipt image.
-// Calls any OpenAI-compatible vision endpoint (Typhoon, Gemini-compat, OpenAI…).
-// Configure via env; with no key it returns nulls so the typed-amount flow still works.
-//   OCR_API_KEY   - provider key (required to enable)
-//   OCR_API_URL   - chat-completions URL (default Typhoon)
-//   OCR_MODEL     - vision model id
+// Calls any OpenAI-compatible vision endpoint; defaults to Gemini's compat layer.
+// With no key it returns nulls so the typed-amount flow still works.
+//   OCR_API_KEY   - provider key (required to enable)  ← only thing you must set
+//   OCR_API_URL   - chat-completions URL (default: Gemini OpenAI-compatible)
+//   OCR_MODEL     - vision model id (default: gemini-2.5-flash-lite; can use gemini-3.5-flash)
 export interface OcrResult {
   amount: number | null;
   vendor: string | null;
@@ -23,8 +23,8 @@ const num = (v: any): number | null => {
 export async function runOcr(image: Buffer): Promise<OcrResult> {
   const key = process.env.OCR_API_KEY;
   if (!key) return STUB; // not configured yet
-  const url = process.env.OCR_API_URL || 'https://api.opentyphoon.ai/v1/chat/completions';
-  const model = process.env.OCR_MODEL || 'typhoon-v2-vision-instruct';
+  const url = process.env.OCR_API_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+  const model = process.env.OCR_MODEL || 'gemini-2.5-flash-lite';
   try {
     const b64 = image.toString('base64');
     const res = await fetch(url, {
