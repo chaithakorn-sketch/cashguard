@@ -41,7 +41,11 @@ async function handleEvent(ev: any) {
 async function handleMessage(ev: any) {
   const userId = ev.source?.userId;
   if (!userId || !ev.message) return;
+  // Only act inside a REGISTERED branch group. The OA also lives in other groups
+  // and DMs — ignore everything that isn't a known branch's line_group_id so we
+  // never read or record messages from anywhere else.
   const branch = await resolveBranch(ev);
+  if (!branch) return;
   if (ev.message.type === 'image') return handleImage(ev, userId, branch);
   if (ev.message.type === 'text') return handleText(ev, userId, branch);
 }
