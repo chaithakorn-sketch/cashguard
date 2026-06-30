@@ -51,12 +51,15 @@ export function hamming(a: string, b: string): number {
 }
 
 /**
- * Find an existing receipt whose hash is within `threshold` Hamming distance.
- * Only looks back `windowDays` — an identical-looking receipt from months ago is
- * almost always a same-template coincidence (7-Eleven slips etc.), not a re-submit,
- * so limiting the window cuts false positives while still catching real re-sends.
+ * Find an existing receipt that is really the same one.
+ * pHash alone is too coarse for bank transfer slips — every slip from the same
+ * app shares a near-identical template (logo, layout) and only differs in small
+ * text, so two genuinely different slips land within Hamming distance. We therefore
+ * confirm a perceptual match with the OCR amount: same look + same amount = re-send;
+ * same look + different amount = different slip, not a duplicate.
+ * Also limited to `windowDays` (an identical look months ago is a template coincidence).
  */
-export async function findDuplicate(hash: string | null, threshold = 6, windowDays = 60) {
+export async function findDuplicate(hash: string | null, threshold = 6, windowDays = 60, amount: number | null = null) {
   if (!hash) return null;
   const since = new Date(Date.now() - windowDays * 86400_000).toISOString();
   const { data } = await sb.from('receipts')
@@ -64,7 +67,13 @@ export async function findDuplicate(hash: string | null, threshold = 6, windowDa
     .not('phash', 'is', null)
     .gte('uploaded_at', since);
   for (const r of data ?? []) {
-    if (r.phash && hamming(hash, r.phash) <= threshold) return r;
+    if (!r.phash || hamming(hash, r.phash) > threshold) continue;
+    const prevAmt = (r as any).entries?.amount;
+    if (amount != null && prevAmt != null) {
+      const tol = Math.max(1, Number(prevAmt) * 0.01);
+      if (Math.abs(Number(amount) - Number(prevAmt)) > tol) continue; // different amount -> not the same slip
+    }
+    return r;
   }
   return null;
 }

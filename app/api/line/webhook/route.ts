@@ -60,14 +60,15 @@ async function handleImage(ev: any, userId: string, branch: any) {
 
   const { buf, contentType } = await getMessageContent(ev.message.id);
   const hash = await pHash(buf);
-  const dup = await findDuplicate(hash);
+  const ocr = await runOcr(buf); // before the dup check so the amount can disambiguate look-alike slips
   const draft = await draftForNewInput(emp.id, branch?.id ?? emp.branch_id);
+  const dup = await findDuplicate(hash, 6, 60, ocr.amount ?? null);
 
   if (dup) {
     const prev: any = (dup as any).entries;
     return reply(ev.replyToken, [flexMessage('ตรวจพบรูปซ้ำ', flex.flexRejectedDuplicate({
       id: draft.id,
-      amount: draft.amount ?? prev?.amount ?? 0,
+      amount: ocr.amount ?? draft.amount ?? prev?.amount ?? 0,
       prevDate: prev?.submitted_at ? new Date(prev.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '-',
       prevBy: '-',
       prevItem: prev?.vendor ?? prev?.description ?? '-',
@@ -75,7 +76,6 @@ async function handleImage(ev: any, userId: string, branch: any) {
   }
 
   const path = await uploadReceipt(draft.id, buf, contentType);
-  const ocr = await runOcr(buf);
   await attachReceipt(draft.id, path, hash, ocr.raw, ocr.amount, ocr.evidenceType);
   const patch: any = {};
   if (ocr.vendor) patch.vendor = ocr.vendor;
