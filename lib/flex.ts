@@ -32,14 +32,14 @@ function pill() {
   ]};
 }
 function header(eyebrow: string, title: string, mascot: string) {
-  const mascotImg = AB ? [{ type:'image', url:mc(mascot), size:'96px', aspectMode:'fit', flex:0, gravity:'bottom', align:'end' }] : [];
+  const mascotImg = AB ? [{ type:'image', url:mc(mascot), size:'128px', aspectMode:'fit', flex:0, gravity:'bottom', align:'end' }] : [];
   return { type:'box', layout:'vertical', backgroundColor:RED, paddingAll:'16px', spacing:'md',
     contents:[
       pill(),
       { type:'box', layout:'horizontal', contents:[
         { type:'box', layout:'vertical', flex:1, spacing:'none', justifyContent:'flex-end', contents:[
           { type:'text', text:eyebrow, color:'#FFFFFFCC', size:'xs', weight:'bold' },
-          { type:'text', text:title, color:'#FFFFFF', weight:'bold', size:'xxl', wrap:true },
+          { type:'text', text:title, color:'#FFFFFF', weight:'bold', size:'xxl', wrap:true, maxLines:1, adjustMode:'shrink-to-fit' },
         ]},
         ...mascotImg,
       ]},
@@ -49,12 +49,18 @@ function header(eyebrow: string, title: string, mascot: string) {
 // ---- body primitives ----
 const SEP = { type:'separator', margin:'lg', color:HAIR };
 const captionRow = (t: string) => ({ type:'text', text:t, size:'xs', color:MUTE, weight:'bold', wrap:true });
-// big amount, sign-coloured. kind: 'out' (−red) | 'in' (+green) | 'neutral' (ink)
+// big amount, sign-coloured + two-tone (big integer, smaller decimal + ฿).
+// kind: 'out' (−red) | 'in' (+green) | 'neutral' (ink, gray decimal)
 function amount(value: number, kind: 'out' | 'in' | 'neutral') {
   const sign = kind === 'out' ? '−' : kind === 'in' ? '+' : '';
   const color = kind === 'out' ? RED : kind === 'in' ? GREEN : INK;
-  return { type:'text', margin:'xs', color, weight:'bold', size:'3xl', wrap:false,
-    text:`${sign}${money(value)} ฿` };
+  const s = money(value); const dot = s.indexOf('.');
+  const intPart = dot < 0 ? s : s.slice(0, dot);
+  const dec = dot < 0 ? '' : s.slice(dot); // ".00"
+  return { type:'text', margin:'xs', weight:'bold', wrap:false, contents:[
+    { type:'span', text:`${sign}${intPart}`, size:'3xl', color, weight:'bold' },
+    { type:'span', text:`${dec} ฿`, size:'lg', color: kind === 'neutral' ? GRAY : color, weight:'bold' },
+  ]};
 }
 function kv(label: string, value: string, strong = true) {
   return { type:'box', layout:'horizontal', margin:'md', contents:[
@@ -116,7 +122,10 @@ export function flexAskEvidence(e:{id:string, amount:number, category:string}) {
       captionRow(e.category || 'ค่าใช้จ่าย'),
       amount(e.amount, 'neutral'),
       SEP,
-      { type:'text', margin:'lg', size:'sm', color:'#5c5c66', wrap:true, text:'ส่งรูปใบเสร็จเพื่อบันทึกได้เลยครับ (ไม่ต้องกดปุ่ม)' },
+      { type:'text', margin:'lg', size:'sm', wrap:true, contents:[
+        { type:'span', text:'ส่งรูปใบเสร็จเพื่อบันทึกได้เลยครับ ', color:'#5c5c66' },
+        { type:'span', text:'(ไม่ต้องกดปุ่ม)', color:MUTE },
+      ]},
       btnRow([ outlineBtn('ไม่มีหลักฐาน', { data:`action=no_evidence&id=${e.id}` }), ghostBtn('ยกเลิก', { data:`action=retake&id=${e.id}` }) ]),
     ]));
 }
@@ -141,7 +150,10 @@ export function flexTopupAskSlip(e:{id:string, amount:number}) {
       captionRow('ยอดเติมเงิน'),
       amount(e.amount, 'neutral'),
       SEP,
-      { type:'text', margin:'lg', size:'sm', color:'#5c5c66', wrap:true, text:'ส่งรูปสลิปโอนเงินเพื่อยืนยันการเติม (ส่งรูปได้เลย ไม่ต้องกดปุ่ม)' },
+      { type:'text', margin:'lg', size:'sm', wrap:true, contents:[
+        { type:'span', text:'ส่งรูปสลิปโอนเงินเพื่อยืนยันการเติม ', color:'#5c5c66' },
+        { type:'span', text:'(ส่งรูปได้เลย ไม่ต้องกดปุ่ม)', color:MUTE },
+      ]},
       btnRow([ outlineBtn('แนบภายหลัง', { data:`action=no_evidence&id=${e.id}` }), ghostBtn('ยกเลิก', { data:`action=retake&id=${e.id}` }) ]),
     ]));
 }
