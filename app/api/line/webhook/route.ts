@@ -25,8 +25,9 @@ export async function POST(req: NextRequest) {
     return new NextResponse('bad signature', { status: 401 });
   }
   const body = JSON.parse(raw);
+  const dest: string | undefined = body.destination; // the receiving bot's own userId
   for (const ev of body.events ?? []) {
-    try { await handleEvent(ev); } catch (e) { console.error('event error', e); }
+    try { await handleEvent(ev, dest); } catch (e) { console.error('event error', e); }
   }
   return NextResponse.json({ ok: true });
 }
@@ -50,20 +51,20 @@ async function resolveBranch(ev: any) {
   return data;
 }
 
-async function handleEvent(ev: any) {
-  if (ev.type === 'message') return handleMessage(ev);
+async function handleEvent(ev: any, dest?: string) {
+  if (ev.type === 'message') return handleMessage(ev, dest);
   if (ev.type === 'postback') return handlePostback(ev);
 }
 
 // ---------------------------------------------------------------- messages
-async function handleMessage(ev: any) {
+async function handleMessage(ev: any, dest?: string) {
   const userId = ev.source?.userId;
   if (!userId || !ev.message) return;
   // Only act inside a REGISTERED branch group — never in DMs or other groups.
   const branch = await resolveBranch(ev);
   if (!branch) return;
   if (ev.message.type === 'image') return handleImage(ev, userId, branch);
-  if (ev.message.type === 'text') return handleText(ev, userId, branch);
+  if (ev.message.type === 'text') return handleText(ev, userId, branch, dest);
 }
 
 async function greet(emp: any, branch: any) {
@@ -97,9 +98,9 @@ async function handleBalance(ev: any, userId: string, branch: any) {
 
 // Text is processed only when the OA is @tagged (mention-gate), OR when the sender
 // already has an open draft waiting for its amount (photo-first continuation).
-async function handleText(ev: any, userId: string, branch: any) {
+async function handleText(ev: any, userId: string, branch: any, dest?: string) {
   const message = ev.message;
-  const mentioned = isMentioned(message);
+  const mentioned = isMentioned(message, dest);
   const existing = await findEmployee(userId);
   const awaitingAmount = existing ? await draftAwaitingAmount(existing.id) : null;
   if (!mentioned && !awaitingAmount) return; // not addressed, no active flow -> ignore chit-chat

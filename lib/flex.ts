@@ -17,18 +17,22 @@ const money = (n: number) => Number(n).toLocaleString('en-US', { minimumFraction
 const baht = (n: number) => money(n) + ' ฿';
 
 // ---- header ----
+// Images are included only when ASSET_BASE is set — an unhosted (relative) image
+// URL makes LINE reject the whole Flex message, so we degrade to text-only instead.
 function pill() {
+  const logo = AB ? [{ type:'image', url:LOGO, size:'16px', aspectMode:'fit', flex:0 }] : [];
   return { type:'box', layout:'horizontal', contents:[
     { type:'box', layout:'horizontal', flex:0, backgroundColor:'#FFFFFF', cornerRadius:'20px',
       paddingTop:'4px', paddingBottom:'4px', paddingStart:'8px', paddingEnd:'11px', spacing:'xs', alignItems:'center',
       contents:[
-        { type:'image', url:LOGO, size:'16px', aspectMode:'fit', flex:0 },
+        ...logo,
         { type:'text', text:'Carcamstore', color:RED, weight:'bold', size:'xs', gravity:'center', flex:0 },
       ]},
     { type:'filler' },
   ]};
 }
 function header(eyebrow: string, title: string, mascot: string) {
+  const mascotImg = AB ? [{ type:'image', url:mc(mascot), size:'96px', aspectMode:'fit', flex:0, gravity:'bottom', align:'end' }] : [];
   return { type:'box', layout:'vertical', backgroundColor:RED, paddingAll:'16px', spacing:'md',
     contents:[
       pill(),
@@ -37,7 +41,7 @@ function header(eyebrow: string, title: string, mascot: string) {
           { type:'text', text:eyebrow, color:'#FFFFFFCC', size:'xs', weight:'bold' },
           { type:'text', text:title, color:'#FFFFFF', weight:'bold', size:'xxl', wrap:true },
         ]},
-        { type:'image', url:mc(mascot), size:'96px', aspectMode:'fit', flex:0, gravity:'bottom', align:'end' },
+        ...mascotImg,
       ]},
     ]};
 }

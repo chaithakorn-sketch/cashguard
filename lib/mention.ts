@@ -5,11 +5,16 @@
 // userId, so we also match LINE_BOT_USER_ID when it is configured.
 const BOT_USER_ID = process.env.LINE_BOT_USER_ID || '';
 
-export function isMentioned(message: any): boolean {
+// `botUserId` should be the webhook body's top-level `destination` (the receiving
+// bot's own userId) — passing it makes the @tag gate work with zero env config.
+// We still honour mention.isSelf (current webhooks) and LINE_BOT_USER_ID (fallback).
+export function isMentioned(message: any, botUserId?: string): boolean {
   const mentionees = message?.mention?.mentionees;
   if (!Array.isArray(mentionees)) return false;
-  return mentionees.some(
-    (m: any) => m?.isSelf === true || (BOT_USER_ID && m?.userId === BOT_USER_ID)
+  return mentionees.some((m: any) =>
+    m?.isSelf === true ||
+    (botUserId && m?.userId === botUserId) ||
+    (BOT_USER_ID && m?.userId === BOT_USER_ID)
   );
 }
 
