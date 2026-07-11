@@ -37,7 +37,7 @@ function amount(value: number, kind: 'out' | 'in' | 'neutral') {
   const intPart = dot < 0 ? s : s.slice(0, dot);
   const dec = dot < 0 ? '' : s.slice(dot); // ".00"
   return { type:'text', margin:'xs', weight:'bold', wrap:false, contents:[
-    { type:'span', text:`${sign}${intPart}`, size:'3xl', color, weight:'bold' },
+    { type:'span', text:`${sign}${intPart}`, size:'4xl', color, weight:'bold' },
     { type:'span', text:`${dec} ฿`, size:'lg', color: kind === 'neutral' ? GRAY : color, weight:'bold' },
   ]};
 }
@@ -87,7 +87,7 @@ const outlineBtn = (label: string, a: { data?: string; uri?: string }) =>
 const ghostBtn = (label: string, a: { data?: string; uri?: string }) =>
   ({ type:'box', layout:'vertical', flex:1, backgroundColor:'#f1f1f3', cornerRadius:'12px',
      contents:[{ type:'button', style:'link', color:GRAY, height:'sm', action:act(a, label) }] });
-const btnRow = (b: any[]) => ({ type:'box', layout:'horizontal', spacing:'sm', margin:'lg', contents:b });
+const btnRow = (b: any[]) => ({ type:'box', layout:'horizontal', spacing:'md', margin:'lg', contents:b });
 const bodyBox = (contents: any[]) => ({ type:'box', layout:'vertical', paddingAll:'20px', contents });
 // bubble(headerName, body, footer) — headerName picks the baked hero image.
 const bubble = (headerName: string, b: any, f?: any) => {
