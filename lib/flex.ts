@@ -21,8 +21,48 @@ const baht = (n: number) => money(n) + ' ฿';
 // bleed exactly — LINE Flex can't position a floating image like that. Requires
 // ASSET_BASE (an unhosted image URL makes LINE reject the card), so hero is omitted
 // when it's unset (the card still renders body-only).
-function hero(name: string) {
-  return AB ? { type:'image', url:`${AB}/headers/${name}.png`, size:'full', aspectRatio:'360:132', aspectMode:'cover' } : undefined;
+const LOGO = `${AB}/cammo/logo-carcam-red.png`;
+// name -> Cammo pose (background image) + eyebrow + title (real Flex text overlay)
+const HEADER_SPEC: Record<string, { pose: string; eyebrow: string; title: string }> = {
+  'ask-evidence':    { pose:'welcome',   eyebrow:'รายจ่าย',      title:'ขอหลักฐาน' },
+  'success-expense': { pose:'thumbsup',  eyebrow:'รายจ่าย',      title:'บันทึกสำเร็จ' },
+  'ask-slip':        { pose:'welcome',   eyebrow:'เติมเงิน',      title:'ขอสลิปโอนเงิน' },
+  'success-topup':   { pose:'growth',    eyebrow:'รายรับ',        title:'เติมเงินสำเร็จ' },
+  'group-expense':   { pose:'checklist', eyebrow:'แจ้งเข้ากลุ่ม', title:'ค่าใช้จ่ายใหม่' },
+  'group-topup':     { pose:'growth',    eyebrow:'แจ้งเข้ากลุ่ม', title:'เติมเงินใหม่' },
+  'group-edit':      { pose:'growth',    eyebrow:'แจ้งเข้ากลุ่ม', title:'มีการแก้ไข' },
+  'parse-fail':      { pose:'warn',      eyebrow:'ระบบ',          title:'อ่านรายการไม่ได้' },
+  'balance':         { pose:'checklist', eyebrow:'กระเป๋าเงิน',   title:'ยอดคงเหลือ' },
+  'expired':         { pose:'wait',      eyebrow:'ระบบ',          title:'รายการหมดอายุ' },
+  'duplicate':       { pose:'inspect',   eyebrow:'ความปลอดภัย',   title:'ตรวจพบรูปซ้ำ' },
+  'suspicious':      { pose:'inspect',   eyebrow:'ความปลอดภัย',   title:'พบสลิปน่าสงสัย' },
+};
+
+// Header = red+Cammo background IMAGE (baked, bleeds like the mockup) with the pill,
+// eyebrow and title as REAL Flex text overlaid on top (crisp, correct sizes).
+function headerBox(name: string) {
+  const s = HEADER_SPEC[name] || HEADER_SPEC['ask-evidence'];
+  const bg = { type:'image', url:`${AB}/headers/bg-${s.pose}.png`, size:'full', aspectRatio:'360:132', aspectMode:'cover' };
+  const pill = { type:'box', layout:'horizontal', contents:[
+    { type:'box', layout:'horizontal', flex:0, backgroundColor:'#FFFFFF', cornerRadius:'20px',
+      paddingTop:'4px', paddingBottom:'4px', paddingStart:'7px', paddingEnd:'11px', spacing:'6px', alignItems:'center',
+      contents:[
+        { type:'image', url:LOGO, size:'16px', aspectMode:'fit', flex:0 },
+        { type:'text', text:'Carcamstore', color:RED, weight:'bold', size:'xs', gravity:'center', flex:0 },
+      ]},
+    { type:'filler' },
+  ]};
+  const overlay = { type:'box', layout:'vertical', position:'absolute',
+    offsetTop:'0px', offsetStart:'0px', offsetEnd:'0px', offsetBottom:'0px',
+    paddingTop:'14px', paddingBottom:'14px', paddingStart:'18px', paddingEnd:'18px', justifyContent:'space-between',
+    contents:[
+      pill,
+      { type:'box', layout:'vertical', spacing:'none', contents:[
+        { type:'text', text:s.eyebrow, color:'#FFFFFFCC', size:'xs', weight:'bold' },
+        { type:'text', text:s.title, color:'#FFFFFF', weight:'bold', size:'xxl', wrap:false },
+      ]},
+    ]};
+  return { type:'box', layout:'vertical', paddingAll:'0px', contents:[ bg, overlay ] };
 }
 
 // ---- body primitives ----
@@ -97,7 +137,7 @@ const bodyBox = (contents: any[]) => ({ type:'box', layout:'vertical', paddingAl
 // bubble(headerName, body, footer) — headerName picks the baked hero image.
 const bubble = (headerName: string, b: any, f?: any) => {
   const o: any = { type:'bubble', size:'mega', body:b };
-  const h = hero(headerName); if (h) o.hero = h;
+  if (AB) o.header = headerBox(headerName);
   if (f) o.footer = f;
   return o;
 };
