@@ -84,6 +84,56 @@ export async function isReady(entry: any): Promise<boolean> {
   return (await receiptCount(entry.id)) >= 1;
 }
 
+/** Latest open draft of ANY type (expense or topup) for this payer, or null.
+ *  Used by the image handler: a photo continues whatever draft is open. */
+export async function openAnyDraft(payerId: string) {
+  const { data } = await sb.from('entries')
+    .select('*')
+    .eq('payer_id', payerId).eq('status', 'draft')
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  return data;
+}
+
+/** An expense draft that has a receipt but is still waiting for its typed amount
+ *  (photo-first case). Lets a following amount text land in the same basket. */
+export async function draftAwaitingAmount(payerId: string) {
+  const d = await openDraft(payerId);
+  if (d && d.amount == null && (await receiptCount(d.id)) >= 1) return d;
+  return null;
+}
+
+/** The payer's most-recent just-finalized entry (confirmed/flagged) within a short
+ *  window. Used to attach late-arriving extra photos to a multi-page bill without a
+ *  new draft — LINE delivers each photo as a separate event, so photos after the
+ *  first (which already saved the entry) land here. */
+export async function recentFinalizedEntry(payerId: string, withinMin = 2) {
+  const since = new Date(Date.now() - withinMin * 60_000).toISOString();
+  const { data } = await sb.from('entries')
+    .select('*')
+    .eq('payer_id', payerId).in('status', ['confirmed', 'flagged'])
+    .gte('updated_at', since)
+    .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+  return data;
+}
+
+/** Mark a draft as "no evidence provided" (the [ไม่มีหลักฐาน] path). */
+export async function setEvidenceNone(entryId: string) {
+  unwrap(
+    await sb.from('entries').update({ evidence_type: 'none', updated_at: new Date().toISOString() }).eq('id', entryId),
+    'setEvidenceNone'
+  );
+}
+
+/** The payer's last few confirmed entries of a type (for the success card / web app). */
+export async function recentEntries(payerId: string, type: 'expense' | 'topup', limit = 3) {
+  const { data } = await sb.from('entries')
+    .select('id, amount, vendor, category, description, submitted_at, type, status')
+    .eq('payer_id', payerId).eq('type', type)
+    .in('status', ['confirmed', 'flagged'])
+    .order('submitted_at', { ascending: false }).limit(limit);
+  return data ?? [];
+}
+
 /**
  * Sweep expired baskets (called by Vercel Cron).
  * Drafts with an amount but no receipt -> pending_evidence.

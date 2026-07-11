@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifySignature, reply, push, getMessageContent, flexMessage } from '@/lib/line';
 import { sb, unwrap } from '@/lib/supabase';
-import { draftForNewInput, openDraft, receiptCount, attachReceipt, setAmount, isReady, touch, newTopup } from '@/lib/draft-engine';
+import {
+  draftForNewInput, openAnyDraft, draftAwaitingAmount, attachReceipt, setAmount,
+  setEvidenceNone, isReady, touch, newTopup, recentEntries, recentFinalizedEntry, receiptCount,
+} from '@/lib/draft-engine';
 import { computeFlags } from '@/lib/flags';
 import { balanceFor } from '@/lib/ledger';
 import { runOcr } from '@/lib/ocr';
-import { pHash, findDuplicate } from '@/lib/phash';
-import { uploadReceipt } from '@/lib/storage';
+import { pHash, findDuplicate, hamming } from '@/lib/phash';
+import { uploadReceipt, signedUrl } from '@/lib/storage';
 import { parseText } from '@/lib/parse';
 import { findOrRegister, findEmployee } from '@/lib/register';
+import { isMentioned, stripMention } from '@/lib/mention';
+import { verifySlip } from '@/lib/slip';
+import type { SlipResult } from '@/lib/slip';
 import * as flex from '@/lib/flex';
 
 export const runtime = 'nodejs';
@@ -23,6 +29,18 @@ export async function POST(req: NextRequest) {
     try { await handleEvent(ev); } catch (e) { console.error('event error', e); }
   }
   return NextResponse.json({ ok: true });
+}
+
+// LIFF web-app edit link (opens the entry). Falls back to the in-card undo button
+// when unset so nothing breaks before the web app is wired.
+const EDIT_URL = process.env.LIFF_EDIT_URL || '';
+const editUrlFor = (id: string) =>
+  EDIT_URL ? `${EDIT_URL}${EDIT_URL.includes('?') ? '&' : '?'}entry=${id}` : undefined;
+
+function recentLabel(x: any) {
+  const d = new Date(x.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  const name = x.type === 'topup' ? 'เติมเงิน' : (x.vendor || x.category || x.description || 'รายการ');
+  return { label: `${name} · ${d}`, amount: Number(x.amount || 0) };
 }
 
 async function resolveBranch(ev: any) {
@@ -41,9 +59,7 @@ async function handleEvent(ev: any) {
 async function handleMessage(ev: any) {
   const userId = ev.source?.userId;
   if (!userId || !ev.message) return;
-  // Only act inside a REGISTERED branch group. The OA also lives in other groups
-  // and DMs — ignore everything that isn't a known branch's line_group_id so we
-  // never read or record messages from anywhere else.
+  // Only act inside a REGISTERED branch group — never in DMs or other groups.
   const branch = await resolveBranch(ev);
   if (!branch) return;
   if (ev.message.type === 'image') return handleImage(ev, userId, branch);
@@ -53,88 +69,73 @@ async function handleMessage(ev: any) {
 async function greet(emp: any, branch: any) {
   if (!emp?.line_user_id) return;
   await push(emp.line_user_id, [{ type: 'text',
-    text: `ลงทะเบียนให้แล้วครับ: ${emp.name}${branch ? ' · ' + branch.name : ''}\nส่งบิล (รูป + ยอด) ได้เลย` }]);
+    text: `ลงทะเบียนให้แล้วครับ: ${emp.name}${branch ? ' · ' + branch.name : ''}\nพิมพ์ทักบอทตามด้วยรายการ เช่น “@Cammo ค่าน้ำมัน 100” แล้วแนบรูปบิล` }]);
 }
 
-// A photo is always an explicit "I'm logging an expense" signal.
-async function handleImage(ev: any, userId: string, branch: any) {
-  const { employee: emp, justRegistered } = await findOrRegister(userId, branch?.id ?? null, ev.source?.groupId);
-  if (!emp) return;
-  if (justRegistered) await greet(emp, branch);
-
-  const { buf, contentType } = await getMessageContent(ev.message.id);
-  const hash = await pHash(buf);
-  const ocr = await runOcr(buf); // before the dup check so the amount can disambiguate look-alike slips
-  const draft = await draftForNewInput(emp.id, branch?.id ?? emp.branch_id);
-  const dup = await findDuplicate(hash, 6, 60, ocr.amount ?? null);
-
-  if (dup) {
-    const prev: any = (dup as any).entries;
-    return reply(ev.replyToken, [flexMessage('ตรวจพบรูปซ้ำ', flex.flexRejectedDuplicate({
-      id: draft.id,
-      amount: ocr.amount ?? draft.amount ?? prev?.amount ?? 0,
-      prevDate: prev?.submitted_at ? new Date(prev.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '-',
-      prevBy: '-',
-      prevItem: prev?.vendor ?? prev?.description ?? '-',
-    }))]);
-  }
-
-  const path = await uploadReceipt(draft.id, buf, contentType);
-  await attachReceipt(draft.id, path, hash, ocr.raw, ocr.amount, ocr.evidenceType);
-  const patch: any = {};
-  if (ocr.vendor) patch.vendor = ocr.vendor;
-  if (ocr.amount != null && draft.amount == null) patch.amount = ocr.amount; // OCR auto-fill: no typing needed
-  if (Object.keys(patch).length) await setAmount(draft.id, patch);
-  return maybeConfirm(ev, draft.id);
-}
-
-// Words that mark a number as money rather than group chit-chat.
-const MONEY_CUE = /฿|บาท|thb|ค่า|จ่าย|ซื้อ|เบิก/i;
-// Specific top-up phrases (NOT bare "เติม", which also means เติมน้ำมัน = an expense).
 const TOPUP_CUE = /เติมเงิน|รับเงินสด|เงินเข้า/i;
+// "@Cammo ยอด" / "เช็คยอด" / "คงเหลือ" — show the balance card (no amount involved).
+const BALANCE_CUE = /^(เช็ค)?(ยอด(เงิน|คงเหลือ)?|คงเหลือ|กระเป๋า(เงิน)?|ดูยอด)\s*\??$/;
 
-async function handleTopup(ev: any, userId: string, branch: any, amount: number) {
+// Balance card (card 10): current float + this-month in/out for the payer.
+async function handleBalance(ev: any, userId: string, branch: any) {
   const { employee: emp, justRegistered } = await findOrRegister(userId, branch?.id ?? null, ev.source?.groupId);
   if (!emp) return;
   if (justRegistered) await greet(emp, branch);
-  const t = await newTopup(emp.id, branch?.id ?? emp.branch_id, amount);
-  return reply(ev.replyToken, [flexMessage('ยืนยันเติมเงิน', flex.flexTopupConfirm({ id: t.id, amount }))]);
+  const bal = await balanceFor(emp.id);
+  const start = new Date(); start.setDate(1); start.setHours(0, 0, 0, 0);
+  const { data: rows } = await sb.from('entries').select('type, amount')
+    .eq('payer_id', emp.id).in('status', ['confirmed', 'flagged'])
+    .gte('submitted_at', start.toISOString());
+  let monthIn = 0, monthOut = 0;
+  for (const r of rows ?? []) {
+    const a = Number(r.amount || 0);
+    if (r.type === 'topup' || r.type === 'return_refund') monthIn += a; else monthOut += a;
+  }
+  return reply(ev.replyToken, [flexMessage('ยอดคงเหลือ',
+    flex.flexBalance({ branch: branch?.name ?? '', balance: bal, monthIn, monthOut }))]);
 }
 
-// Text only counts as an expense if it has an amount AND either a money cue or a
-// receipt already waiting for its amount — otherwise a stray number in normal
-// group conversation ("รอบ 2", "โทร 089...") would silently create a record.
+// Text is processed only when the OA is @tagged (mention-gate), OR when the sender
+// already has an open draft waiting for its amount (photo-first continuation).
 async function handleText(ev: any, userId: string, branch: any) {
-  const text: string = ev.message.text ?? '';
-  const parsed = await parseText(text);
+  const message = ev.message;
+  const mentioned = isMentioned(message);
+  const existing = await findEmployee(userId);
+  const awaitingAmount = existing ? await draftAwaitingAmount(existing.id) : null;
+  if (!mentioned && !awaitingAmount) return; // not addressed, no active flow -> ignore chit-chat
+
+  const text = stripMention(message);
 
   // "ตั้งชื่อ ป๊อก" — fix the auto-registered LINE display name.
   const nameCmd = text.match(/^\s*ตั้งชื่อ\s+(.{1,40})$/);
   if (nameCmd) {
-    const emp = await findEmployee(userId);
-    if (!emp) return reply(ev.replyToken, [{ type: 'text', text: 'ส่งบิลสักครั้งเพื่อลงทะเบียนก่อน แล้วค่อยตั้งชื่อได้ครับ' }]);
+    const emp = existing ?? await findEmployee(userId);
+    if (!emp) return reply(ev.replyToken, [{ type: 'text', text: 'ทักบอทพร้อมรายการสักครั้งเพื่อลงทะเบียนก่อน แล้วค่อยตั้งชื่อได้ครับ' }]);
     const nick = nameCmd[1].trim();
     unwrap(await sb.from('employees').update({ nickname: nick, name: nick }).eq('id', emp.id), 'setName');
     return reply(ev.replyToken, [{ type: 'text', text: `ตั้งชื่อเป็น "${nick}" แล้วครับ` }]);
   }
 
-  // "เติมเงิน 5000" — record a cash top-up.
+  // "@Cammo ยอด" — show the balance card.
+  if (BALANCE_CUE.test(text)) return handleBalance(ev, userId, branch);
+
+  const parsed = await parseText(text);
+
+  // "@Cammo เติมเงิน 5000" — start a top-up (asks for the slip next).
   if (TOPUP_CUE.test(text) && parsed.amount != null) return handleTopup(ev, userId, branch, parsed.amount);
 
-  const existing = await findEmployee(userId);
-  let pendingAwaitingAmount = false;
-  if (existing) {
-    const open = await openDraft(existing.id);
-    pendingAwaitingAmount = !!open && open.amount == null && (await receiptCount(open.id)) >= 1;
+  if (parsed.amount == null) {
+    // Addressed but nothing parseable -> the "อ่านไม่ออก" card (only if @tagged).
+    if (mentioned) return reply(ev.replyToken, [flexMessage('อ่านรายการไม่ได้', flex.flexParseFail())]);
+    return;
   }
-  const hasMoneyCue = MONEY_CUE.test(text) || !!parsed.vendor || !!parsed.category_code;
-  if (parsed.amount == null || !(pendingAwaitingAmount || hasMoneyCue)) return; // chit-chat
 
   const { employee: emp, justRegistered } = await findOrRegister(userId, branch?.id ?? null, ev.source?.groupId);
   if (!emp) return;
   if (justRegistered) await greet(emp, branch);
 
-  const draft = await draftForNewInput(emp.id, branch?.id ?? emp.branch_id);
+  // Continue the photo-first basket if there is one, else open a fresh basket.
+  const draft = awaitingAmount ?? await draftForNewInput(emp.id, branch?.id ?? emp.branch_id);
   await setAmount(draft.id, {
     amount: parsed.amount,
     vendor: parsed.vendor,
@@ -142,31 +143,119 @@ async function handleText(ev: any, userId: string, branch: any) {
     category_code: parsed.category_code,
     description: parsed.description,
   } as any);
-  return maybeConfirm(ev, draft.id);
+
+  const fresh = unwrap(await sb.from('entries').select('*').eq('id', draft.id).single(), 'handleText.refetch');
+  // Photo already here -> save now. Otherwise ask for evidence (with a no-evidence option).
+  if (await isReady(fresh)) return finalizeEntry(ev, draft.id);
+  return reply(ev.replyToken, [flexMessage('ส่งรูปหลักฐาน',
+    flex.flexAskEvidence({ id: draft.id, amount: parsed.amount, category: parsed.category_name ?? 'อื่นๆ' }))]);
 }
 
-async function maybeConfirm(ev: any, entryId: string) {
-  const e = unwrap(await sb.from('entries').select('*').eq('id', entryId).single(), 'maybeConfirm.fetch');
-  const ready = await isReady(e);
-  console.log(`[maybeConfirm] entry=${entryId} amount=${e.amount} ocr_verified=${e.ocr_verified} ready=${ready}`);
-  if (ready) {
-    const ocrOk = e.ocr_verified && e.ocr_amount != null &&
-      Math.abs(Number(e.amount) - Number(e.ocr_amount)) <= Math.max(5, Number(e.ocr_amount) * 0.02);
-    if (e.ocr_verified && e.ocr_amount != null && !ocrOk) {
-      return reply(ev.replyToken, [flexMessage('ยอดไม่ตรงบิล',
-        flex.flexOcrMismatch({ id: e.id, typed: Number(e.amount), ocr: Number(e.ocr_amount) }))]);
-    }
-    return reply(ev.replyToken, [flexMessage('ยืนยันรายการ', flex.flexDraftConfirm({
-      id: e.id, amount: Number(e.amount), vendor: e.vendor ?? 'ไม่ระบุ', category: e.category ?? 'อื่นๆ', ocrOk,
-    }))]);
+async function handleTopup(ev: any, userId: string, branch: any, amount: number) {
+  const { employee: emp, justRegistered } = await findOrRegister(userId, branch?.id ?? null, ev.source?.groupId);
+  if (!emp) return;
+  if (justRegistered) await greet(emp, branch);
+  const t = await newTopup(emp.id, branch?.id ?? emp.branch_id, amount);
+  return reply(ev.replyToken, [flexMessage('ส่งสลิปเติมเงิน', flex.flexTopupAskSlip({ id: t.id, amount }))]);
+}
+
+// An image continues whatever draft the sender already opened by @tagging. A photo
+// with no open draft is ignored — that keeps the @tag-gate intact (a photo can't
+// carry a mention) and prevents stray group photos from creating records.
+async function handleImage(ev: any, userId: string, branch: any) {
+  const emp = await findEmployee(userId);
+  if (!emp) return;
+  const draft = await openAnyDraft(emp.id);
+  if (!draft) {
+    // No open draft: a photo that follows a just-saved entry is another page of the
+    // same bill (multi-image) -> attach it to that entry. Otherwise it's a stray
+    // group photo -> ignore (keeps the @tag-gate intact).
+    const recent = await recentFinalizedEntry(emp.id, 2);
+    if (recent) return attachExtraPhoto(ev, recent);
+    return;
   }
-  const rc = await receiptCount(e.id);
-  const have: string[] = [];
-  if (rc > 0) have.push(`📎 ${rc} รูป`);
-  if (e.amount != null) have.push(`฿${Number(e.amount).toLocaleString('en-US')}`);
-  const need = e.amount == null ? 'พิมพ์ยอดด้วยนะครับ' : 'แนบรูปบิลด้วยนะครับ';
-  const head = have.length ? `รับแล้ว · ${have.join(' · ')}` : 'รับแล้ว';
-  return reply(ev.replyToken, [{ type: 'text', text: `${head}\n${need}` }]);
+
+  const { buf, contentType } = await getMessageContent(ev.message.id);
+  const hash = await pHash(buf);
+  const ocr = await runOcr(buf); // before the dup check so the amount can disambiguate look-alike slips
+
+  // Perceptual duplicate (expense receipts only; top-up slips rely on Slip2Go's own dup check).
+  if (draft.type === 'expense') {
+    const dup = await findDuplicate(hash, 6, 60, ocr.amount ?? draft.amount ?? null);
+    if (dup) {
+      const prev: any = (dup as any).entries;
+      return reply(ev.replyToken, [flexMessage('ตรวจพบรูปซ้ำ', flex.flexRejectedDuplicate({
+        id: draft.id,
+        amount: ocr.amount ?? draft.amount ?? prev?.amount ?? 0,
+        prevDate: prev?.submitted_at ? new Date(prev.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '-',
+        prevBy: '-',
+        prevItem: prev?.vendor ?? prev?.description ?? '-',
+      }))]);
+    }
+  }
+
+  const path = await uploadReceipt(draft.id, buf, contentType);
+  await attachReceipt(draft.id, path, hash, ocr.raw, ocr.amount, ocr.evidenceType);
+
+  // Slip verification (top-ups + anything OCR calls a transfer slip). Best-effort;
+  // Slip2Go needs a fetchable url, so we hand it a short-lived signed url.
+  let slip: SlipResult | null = null;
+  if (draft.type === 'topup' || ocr.evidenceType === 'transfer_slip') {
+    const url = await signedUrl(path, 600);
+    if (url) {
+      slip = await verifySlip(url, draft.amount ?? ocr.amount ?? null);
+      await sb.from('receipts').update({
+        slip_status: slip.status, slip_ref: slip.transRef, slip_raw: slip.raw, slip_checked_at: new Date().toISOString(),
+      }).eq('image_url', path);
+    }
+  }
+
+  // OCR autofill (vendor always; amount only when the payer hasn't typed one).
+  const patch: any = {};
+  if (ocr.vendor) patch.vendor = ocr.vendor;
+  if (ocr.amount != null && draft.amount == null) patch.amount = ocr.amount;
+  if (Object.keys(patch).length) await setAmount(draft.id, patch);
+
+  const e = unwrap(await sb.from('entries').select('*').eq('id', draft.id).single(), 'handleImage.refetch');
+  if (e.amount == null) {
+    // Photo landed but still no amount -> ask for it (basket stays open).
+    return reply(ev.replyToken, [{ type: 'text', text: 'รับรูปแล้ว พิมพ์ยอดด้วยครับ เช่น “ค่าน้ำมัน 100”' }]);
+  }
+
+  // OCR-vs-typed mismatch (expense): the payer's own typo — ask before saving.
+  if (e.type === 'expense' && e.ocr_verified && e.ocr_amount != null) {
+    const ok = Math.abs(Number(e.amount) - Number(e.ocr_amount)) <= Math.max(5, Number(e.ocr_amount) * 0.02);
+    if (!ok) return reply(ev.replyToken, [flexMessage('ยอดไม่ตรงบิล',
+      flex.flexOcrMismatch({ id: e.id, typed: Number(e.amount), ocr: Number(e.ocr_amount) }))]);
+  }
+
+  // Evidence present -> save now (a suspicious slip is recorded + flagged, not blocked).
+  return finalizeEntry(ev, e.id, { slip });
+}
+
+// Attach an extra page/photo to a just-saved entry (multi-image bill). Plain-text
+// reply only — no new card. Skips an exact re-send of a photo already on the entry.
+async function attachExtraPhoto(ev: any, entry: any) {
+  const { buf, contentType } = await getMessageContent(ev.message.id);
+  const hash = await pHash(buf);
+  const { data: existing } = await sb.from('receipts').select('phash').eq('entry_id', entry.id);
+  if (hash && (existing ?? []).some((r: any) => r.phash && hamming(hash, r.phash) <= 6)) {
+    return reply(ev.replyToken, [{ type: 'text', text: 'รูปนี้แนบให้รายการนี้ไปแล้วครับ' }]);
+  }
+  const path = await uploadReceipt(entry.id, buf, contentType);
+  const ocr = await runOcr(buf);
+  unwrap(await sb.from('receipts').insert({ entry_id: entry.id, image_url: path, phash: hash, ocr_raw: ocr.raw }), 'attachExtraPhoto.insert');
+  // A slip on a top-up still gets verified (fraud check), best-effort.
+  if (entry.type === 'topup' || ocr.evidenceType === 'transfer_slip') {
+    const url = await signedUrl(path, 600);
+    if (url) {
+      const slip = await verifySlip(url, entry.amount ?? null);
+      await sb.from('receipts').update({ slip_status: slip.status, slip_ref: slip.transRef, slip_raw: slip.raw, slip_checked_at: new Date().toISOString() }).eq('image_url', path);
+    }
+  }
+  const n = await receiptCount(entry.id);
+  const item = entry.category ?? entry.vendor ?? (entry.type === 'topup' ? 'เติมเงิน' : 'รายการ');
+  return reply(ev.replyToken, [{ type: 'text', text: `📎 เพิ่มรูปที่ ${n} ให้ ${item} ฿${Number(entry.amount ?? 0).toLocaleString('en-US')} แล้วครับ` }]);
 }
 
 // ---------------------------------------------------------------- postbacks
@@ -176,21 +265,28 @@ async function handlePostback(ev: any) {
   const id = params.get('id');
   if (!id) {
     if (action === 'topup_urgent') return reply(ev.replyToken, [{ type: 'text', text: 'แจ้งฝ่ายบัญชีเติมเงินด่วนแล้วครับ' }]);
+    if (action === 'list') return reply(ev.replyToken, [{ type: 'text', text: EDIT_URL ? `ดูรายการทั้งหมดในเว็บแอป:\n${EDIT_URL}` : 'เปิดดูรายการทั้งหมดได้ที่เว็บแอปครับ' }]);
     return;
   }
 
   switch (action) {
+    // ดูรายละเอียด / ดูรายการ (เดิม) — open the entry in the web app.
+    case 'view':
+      return reply(ev.replyToken, [{ type: 'text', text: editUrlFor(id) ? `เปิดดูรายการในเว็บแอป:\n${editUrlFor(id)}` : 'เปิดดูรายการได้ที่เว็บแอปครับ' }]);
+    case 'no_evidence':
+      await setEvidenceNone(id);
+      return finalizeEntry(ev, id);
     case 'confirm':
-      return confirmEntry(ev, id);
+      return finalizeEntry(ev, id);
     case 'use_ocr': {
       const { data: e } = await sb.from('entries').select('ocr_amount').eq('id', id).single();
       if (e?.ocr_amount != null) await setAmount(id, { amount: Number(e.ocr_amount) });
-      return confirmEntry(ev, id);
+      return finalizeEntry(ev, id);
     }
     case 'use_typed':
-      return confirmEntry(ev, id);
+      return finalizeEntry(ev, id);
     case 'second_installment':
-      return confirmEntry(ev, id, { allowDuplicate: true });
+      return finalizeEntry(ev, id, { allowDuplicate: true });
     case 'add_photo':
     case 'attach_now':
       await touch(id);
@@ -203,52 +299,70 @@ async function handlePostback(ev: any) {
       if (!e || e.status === 'rejected') return reply(ev.replyToken, [{ type: 'text', text: 'รายการนี้ถูกยกเลิกไปแล้วครับ' }]);
       unwrap(await sb.from('entries').update({ status: 'rejected', updated_at: new Date().toISOString() }).eq('id', id), 'void.update');
       await sb.from('audit_log').insert({ entry_id: id, actor: e.payer_id ?? 'system', action: 'voided', before: { status: e.status }, after: { status: 'rejected' } });
-      return reply(ev.replyToken, [{ type: 'text', text: `ยกเลิกรายการ ฿${Number(e.amount ?? 0).toLocaleString('en-US')} แล้วครับ\nพิมพ์ยอดผิด? ส่งบิล + ยอดใหม่ได้เลย` }]);
+      return reply(ev.replyToken, [{ type: 'text', text: `ยกเลิกรายการ ฿${Number(e.amount ?? 0).toLocaleString('en-US')} แล้วครับ\nพิมพ์ยอดผิด? ทักบอทพร้อมยอดใหม่ได้เลย` }]);
     }
     case 'split':
-      return reply(ev.replyToken, [{ type: 'text', text: 'โหมดแยกรายการ: ส่งบิลทีละใบ พร้อมยอดของใบนั้นได้เลยครับ' }]);
+      return reply(ev.replyToken, [{ type: 'text', text: 'โหมดแยกรายการ: ทักบอทพร้อมยอดของใบนั้น แล้วแนบบิลทีละใบได้เลยครับ' }]);
     default:
       return reply(ev.replyToken, [{ type: 'text', text: `รับคำสั่ง: ${action}` }]);
   }
 }
 
-async function confirmEntry(ev: any, id: string, opts: { allowDuplicate?: boolean } = {}) {
-  const { data: e } = await sb.from('entries').select('*').eq('id', id).single();
+// Atomically confirm a draft (status + flags + audit via RPC), then reply the
+// success/flagged card. The reply lands in the branch group (events are gated to
+// branch groups) — that IS the Sunlight in-group post for new entries. Web edits
+// use postToBranchGroup() separately since they have no reply token.
+async function finalizeEntry(ev: any, id: string, opts: { allowDuplicate?: boolean; slip?: SlipResult | null } = {}) {
+  const { data: e } = await sb.from('entries').select('*').eq('id', id).maybeSingle();
   if (!e) return;
+  if (e.status !== 'draft') return; // already finalized (double-tap) -> ignore
+
   const { data: emp } = await sb.from('employees').select('*').eq('id', e.payer_id).maybeSingle();
   const { data: br } = await sb.from('branches').select('*').eq('id', e.branch_id).maybeSingle();
 
-  const flags = e.type === 'topup' ? [] : await computeFlags(e); // top-ups don't get expense flags
+  const flags = e.type === 'topup' ? [] : await computeFlags(e);
+  if (opts.slip && (opts.slip.status === 'fail' || opts.slip.status === 'warning')) {
+    flags.push({ kind: 'slip_invalid' as any, detail: opts.slip.note || 'สลิปไม่ผ่านการตรวจ' });
+  }
   const filtered = opts.allowDuplicate ? flags.filter(f => f.kind !== 'duplicate') : flags;
 
   const status = unwrap(await sb.rpc('confirm_entry', {
-    p_entry_id: id,
-    p_flags: filtered,
-    p_actor: e.payer_id ?? 'system',
+    p_entry_id: id, p_flags: filtered, p_actor: e.payer_id ?? 'system',
   }), 'confirm_entry.rpc');
 
   const bal = await balanceFor(e.payer_id);
+  const recent = (await recentEntries(e.payer_id, e.type === 'topup' ? 'topup' : 'expense')).map(recentLabel);
+  const editUrl = editUrlFor(e.id);
 
-  if (status === 'confirmed') {
-    if (e.type === 'topup') {
-      return reply(ev.replyToken, [flexMessage('เติมเงินแล้ว', flex.flexTopup({
-        amount: Number(e.amount), payer: emp?.nickname ?? emp?.name ?? '-', branch: br?.name ?? '-',
-        balance: bal, round: new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }),
-      }))]);
-    }
-    return reply(ev.replyToken, [flexMessage('บันทึกแล้ว', flex.flexExpenseSuccess({
+  const slipFlag = filtered.find(f => f.kind === 'slip_invalid');
+  let card: any;
+  if (slipFlag) {
+    // สลิปน่าสงสัย (card 13) — recorded but flagged; owner alerted below.
+    card = flexMessage('พบสลิปน่าสงสัย', flex.flexSuspiciousSlip({
+      id: e.id, amount: Number(e.amount), item: e.description ?? e.vendor ?? '-',
+      reason: slipFlag.detail, who: emp?.nickname ?? '-', balance: bal,
+    }));
+  } else if (status === 'flagged') {
+    card = flexMessage('รอตรวจสอบ', flex.flexFlagged({
+      id: e.id, amount: Number(e.amount), item: e.description ?? e.vendor ?? '-',
+      reason: filtered[0]?.detail ?? 'ตรวจสอบ',
+      evidence: e.evidence_type === 'none' ? 'ไม่มีบิล' : 'มีบิล',
+      who: emp?.nickname ?? '-', balance: bal,
+    }));
+  } else if (e.type === 'topup') {
+    card = flexMessage('เติมเงินแล้ว', flex.flexTopup({
+      id: e.id, amount: Number(e.amount), payer: emp?.nickname ?? emp?.name ?? '-', branch: br?.name ?? '-',
+      balance: bal, round: new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }), recent, editUrl,
+    }));
+  } else {
+    card = flexMessage('บันทึกแล้ว', flex.flexExpenseSuccess({
       id: e.id, amount: Number(e.amount), vendor: e.vendor ?? 'ไม่ระบุ', category: e.category ?? 'อื่นๆ',
       payer: emp?.nickname ?? emp?.name ?? '-', branch: br?.name ?? '-', balance: bal,
       when: new Date().toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
-    }))]);
+      evidence: e.evidence_type ?? undefined, recent, editUrl,
+    }));
   }
 
-  const flaggedCard = flexMessage('รอตรวจสอบ', flex.flexFlagged({
-    id: e.id, amount: Number(e.amount), item: e.description ?? e.vendor ?? '-',
-    reason: filtered[0]?.detail ?? 'ตรวจสอบ',
-    evidence: e.evidence_type === 'none' ? 'ไม่มีบิล' : 'มีบิล',
-    who: emp?.nickname ?? '-', balance: bal,
-  }));
-  await reply(ev.replyToken, [flaggedCard]);
-  if (process.env.ADMIN_GROUP_ID) await push(process.env.ADMIN_GROUP_ID, [flaggedCard]);
+  await reply(ev.replyToken, [card]);
+  if (status === 'flagged' && process.env.ADMIN_GROUP_ID) await push(process.env.ADMIN_GROUP_ID, [card]);
 }

@@ -9,7 +9,8 @@ export type EvidenceType = 'receipt' | 'transfer_slip' | 'screenshot' | 'none';
 
 export type FlagKind =
   | 'duplicate' | 'backdated' | 'ocr_over' | 'ocr_under'
-  | 'no_bill_freq' | 'over_cap' | 'cross_branch' | 'off_hours' | 'unverified';
+  | 'no_bill_freq' | 'over_cap' | 'cross_branch' | 'off_hours' | 'unverified'
+  | 'slip_invalid';
 
 export interface Employee {
   id: string; line_user_id: string; name: string;
