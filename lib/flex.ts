@@ -26,7 +26,7 @@ function hero(name: string) {
 }
 
 // ---- body primitives ----
-const SEP = { type:'separator', margin:'lg', color:HAIR };
+const SEP = { type:'separator', margin:'16px', color:HAIR };
 const captionRow = (t: string) => ({ type:'text', text:t, size:'xs', color:MUTE, weight:'bold', wrap:true });
 // big amount, sign-coloured + two-tone (big integer, smaller decimal + ฿).
 // kind: 'out' (−red) | 'in' (+green) | 'neutral' (ink, gray decimal)
@@ -56,23 +56,28 @@ function balanceRow(label: string, value: string | number, color = INK) {
 }
 // evidence chip — green (has receipt) or amber (none)
 function evidenceChip(has: boolean) {
-  if (has) return { type:'box', layout:'horizontal', margin:'md', backgroundColor:PANEL, cornerRadius:'11px',
-    paddingAll:'11px', alignItems:'center', spacing:'sm', contents:[
-      { type:'text', text:'แนบหลักฐานแล้ว', size:'sm', color:'#5c5c66', weight:'bold', flex:1, gravity:'center' },
+  if (has) return { type:'box', layout:'horizontal', margin:'14px', backgroundColor:PANEL, cornerRadius:'11px',
+    paddingTop:'9px', paddingBottom:'9px', paddingStart:'11px', paddingEnd:'11px', alignItems:'center', spacing:'sm', contents:[
+      { type:'text', text:'แนบใบเสร็จแล้ว', size:'sm', color:'#5c5c66', weight:'bold', flex:1, gravity:'center' },
       { type:'text', text:'มีหลักฐาน', size:'xs', color:GREEN, weight:'bold', align:'end', gravity:'center', flex:0 },
     ]};
-  return { type:'box', layout:'horizontal', margin:'md', backgroundColor:'#fff8ec', borderColor:'#f4e2bd', borderWidth:'1px',
-    cornerRadius:'11px', paddingAll:'11px', alignItems:'center', spacing:'sm', contents:[
-      { type:'text', text:'บันทึกโดยไม่มีหลักฐาน', size:'sm', color:'#7a5a12', weight:'bold', gravity:'center' },
+  return { type:'box', layout:'horizontal', margin:'14px', backgroundColor:'#fff8ec', borderColor:'#f4e2bd', borderWidth:'1px',
+    cornerRadius:'11px', paddingTop:'10px', paddingBottom:'10px', paddingStart:'12px', paddingEnd:'12px', alignItems:'center', spacing:'sm', contents:[
+      { type:'text', text:'บันทึกโดยไม่มีหลักฐาน', size:'sm', color:'#8a6410', weight:'bold', gravity:'center' },
     ]};
 }
 function recentList(title: string, items: { label: string; amount: number }[], kind: 'out' | 'in') {
-  const rows = (items || []).slice(0, 3).map(r => ({ type:'box', layout:'horizontal', paddingTop:'6px', paddingBottom:'6px', contents:[
-    { type:'text', text:r.label, size:'xs', color:'#5c5c66', flex:1, gravity:'center', wrap:false },
-    { type:'text', text:`${kind==='out'?'−':'+'}${money(r.amount)}`, size:'xs', color:kind==='out'?RED:GREEN, weight:'bold', align:'end', gravity:'center', flex:0 },
-  ]}));
-  return { type:'box', layout:'vertical', margin:'lg', contents:[
-    { type:'text', text:title, size:'xxs', color:'#c2c2c8', weight:'bold' },
+  const list = (items || []).slice(0, 3);
+  const rows: any[] = [];
+  list.forEach((r, i) => {
+    rows.push({ type:'box', layout:'horizontal', paddingTop:'6px', paddingBottom:'6px', contents:[
+      { type:'text', text:r.label, size:'xs', color:'#5c5c66', flex:1, gravity:'center', wrap:false },
+      { type:'text', text:`${kind==='out'?'−':'+'}${money(r.amount)}`, size:'xs', color:kind==='out'?RED:GREEN, weight:'bold', align:'end', gravity:'center', flex:0 },
+    ]});
+    if (i < list.length - 1) rows.push({ type:'separator', color:'#f4f4f6' }); // hairline between rows
+  });
+  return { type:'box', layout:'vertical', margin:'14px', contents:[
+    { type:'text', text:title, size:'xxs', color:'#c2c2c8', weight:'bold', margin:'sm' },
     ...rows,
   ]};
 }
@@ -87,7 +92,7 @@ const outlineBtn = (label: string, a: { data?: string; uri?: string }) =>
 const ghostBtn = (label: string, a: { data?: string; uri?: string }) =>
   ({ type:'box', layout:'vertical', flex:1, backgroundColor:'#f1f1f3', cornerRadius:'12px',
      contents:[{ type:'button', style:'link', color:GRAY, height:'sm', action:act(a, label) }] });
-const btnRow = (b: any[]) => ({ type:'box', layout:'horizontal', spacing:'md', margin:'lg', contents:b });
+const btnRow = (b: any[]) => ({ type:'box', layout:'horizontal', spacing:'md', margin:'16px', contents:b });
 const bodyBox = (contents: any[]) => ({ type:'box', layout:'vertical', paddingAll:'20px', contents });
 // bubble(headerName, body, footer) — headerName picks the baked hero image.
 const bubble = (headerName: string, b: any, f?: any) => {
