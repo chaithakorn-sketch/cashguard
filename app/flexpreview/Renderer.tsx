@@ -82,6 +82,7 @@ function Node({ n }: { n: any }): any {
 function Bubble({ b }: { b: any }) {
   return (
     <div style={{ width: 300, borderRadius: 8, overflow: 'hidden', background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,.15)', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif" }}>
+      {b.hero && <img src={b.hero.url} alt="" style={{ width: '100%', display: 'block' }} />}
       {b.header && <Node n={b.header} />}
       {b.body && <Node n={b.body} />}
       {b.footer && <Node n={b.footer} />}
