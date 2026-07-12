@@ -133,6 +133,11 @@ const outlineBtn = (label: string, a: { data?: string; uri?: string }) =>
 const ghostBtn = (label: string, a: { data?: string; uri?: string }) =>
   ({ type:'box', layout:'vertical', flex:1, backgroundColor:'#f1f1f3', cornerRadius:'12px',
      contents:[{ type:'button', style:'link', color:GRAY, height:'sm', action:act(a, label) }] });
+// Filled primary as a BOX (not a raw LINE button) so its cornerRadius matches
+// outlineBtn/ghostBtn exactly when sitting side-by-side in a btnRow.
+const solidBtn = (label: string, a: { data?: string; uri?: string }, color = INK) =>
+  ({ type:'box', layout:'vertical', flex:1, backgroundColor:color, cornerRadius:'12px',
+     contents:[{ type:'button', style:'link', color:'#FFFFFF', height:'sm', action:act(a, label) }] });
 const btnRow = (b: any[]) => ({ type:'box', layout:'horizontal', spacing:'lg', margin:'16px', contents:b });
 const bodyBox = (contents: any[]) => ({ type:'box', layout:'vertical', paddingAll:'20px', contents });
 // bubble(headerName, body, footer) — headerName picks the baked hero image.
@@ -310,7 +315,7 @@ export function flexSuspiciousSlip(e:{id:string, amount:number, item:string, rea
       { type:'box', layout:'horizontal', margin:'md', backgroundColor:'#fff8ec', borderColor:'#f4e2bd', borderWidth:'1px', cornerRadius:'11px', paddingAll:'11px', contents:[
         { type:'text', text:e.reason, size:'sm', color:'#7a5a12', weight:'bold', wrap:true } ]},
       ...(e.balance != null ? [SEP, balanceRow('ยอดคงเหลือ', String(e.balance))] : []),
-      btnRow([ outlineBtn('ดูรายละเอียด', { data:`action=view&id=${e.id}` }), primaryBtn('ยืนยันเอง', { data:`action=use_typed&id=${e.id}` }) ]),
+      btnRow([ outlineBtn('ดูรายละเอียด', { data:`action=view&id=${e.id}` }), solidBtn('ยืนยันเอง', { data:`action=use_typed&id=${e.id}` }) ]),
     ]));
 }
 
@@ -337,7 +342,7 @@ export function flexOcrMismatch(e:{id:string, typed:number, ocr:number}) {
       amount(e.typed, 'neutral'),
       kv('พิมพ์มา', baht(e.typed)),
       kv('OCR อ่านบิล', baht(e.ocr)),
-      btnRow([ outlineBtn(`ใช้ ${baht(e.ocr)}`, { data:`action=use_ocr&id=${e.id}` }), primaryBtn(`ใช้ ${baht(e.typed)}`, { data:`action=use_typed&id=${e.id}` }) ]),
+      btnRow([ outlineBtn(`ใช้ ${baht(e.ocr)}`, { data:`action=use_ocr&id=${e.id}` }), solidBtn(`ใช้ ${baht(e.typed)}`, { data:`action=use_typed&id=${e.id}` }) ]),
     ]));
 }
 // Low-balance alert
