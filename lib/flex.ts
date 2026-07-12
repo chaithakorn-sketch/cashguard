@@ -286,7 +286,7 @@ export function flexBalance(e:{branch:string, balance:number, monthIn:number, mo
     bodyBox([
       captionRow(`กระเป๋าเงิน${e.branch}`),
       amount(e.balance, 'neutral'),
-      { type:'box', layout:'horizontal', margin:'lg', spacing:'sm', contents:[
+      { type:'box', layout:'horizontal', margin:'lg', spacing:'12px', contents:[
         stat('รายรับเดือนนี้', `+${money(e.monthIn)}`, '#eefaf3', GREEN),
         stat('รายจ่ายเดือนนี้', `−${money(e.monthOut)}`, '#fbeced', RED),
       ]},
