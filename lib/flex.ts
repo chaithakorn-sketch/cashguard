@@ -44,19 +44,20 @@ function headerBox(name: string) {
   const s = HEADER_SPEC[name] || HEADER_SPEC['ask-evidence'];
   const bg = { type:'image', url:`${AB}/headers/bg-${s.pose}.png`, size:'full', aspectRatio:'360:132', aspectMode:'cover' };
   const pill = { type:'box', layout:'horizontal', contents:[
-    { type:'box', layout:'horizontal', flex:0, backgroundColor:'#FFFFFF', cornerRadius:'20px',
-      paddingTop:'4px', paddingBottom:'4px', paddingStart:'7px', paddingEnd:'11px', spacing:'6px', alignItems:'center',
+    { type:'box', layout:'horizontal', flex:0, backgroundColor:'#FFFFFF', cornerRadius:'16px',
+      paddingTop:'3px', paddingBottom:'3px', paddingStart:'6px', paddingEnd:'9px', spacing:'4px', alignItems:'center',
       contents:[
-        { type:'image', url:LOGO, size:'16px', aspectMode:'fit', flex:0 },
-        { type:'text', text:'Carcamstore', color:RED, weight:'bold', size:'xs', gravity:'center', flex:0 },
+        { type:'image', url:LOGO, size:'14px', aspectMode:'fit', flex:0 },
+        { type:'text', text:'Carcamstore', color:RED, weight:'bold', size:'xxs', gravity:'center', flex:0 },
       ]},
     { type:'filler' },
   ]};
   const overlay = { type:'box', layout:'vertical', position:'absolute',
     offsetTop:'0px', offsetStart:'0px', offsetEnd:'0px', offsetBottom:'0px',
-    paddingTop:'14px', paddingBottom:'7px', paddingStart:'18px', paddingEnd:'18px', justifyContent:'space-between',
+    paddingTop:'12px', paddingBottom:'12px', paddingStart:'18px', paddingEnd:'18px',
     contents:[
       pill,
+      { type:'filler' }, // pushes the eyebrow+title group to the bottom edge (reliable on LINE)
       { type:'box', layout:'vertical', spacing:'none', contents:[
         { type:'text', text:s.eyebrow, color:'#FFFFFFCC', size:'xs', weight:'bold' },
         { type:'text', text:s.title, color:'#FFFFFF', weight:'bold', size:'xxl', wrap:false },
@@ -152,7 +153,7 @@ export function flexAskEvidence(e:{id:string, amount:number, category:string}) {
       captionRow(e.category || 'ค่าใช้จ่าย'),
       amount(e.amount, 'neutral'),
       SEP,
-      { type:'text', margin:'lg', size:'xs', wrap:true, contents:[
+      { type:'text', margin:'lg', size:'xxs', wrap:true, contents:[
         { type:'span', text:'ส่งรูปใบเสร็จเพื่อบันทึกได้เลยครับ ', color:'#5c5c66' },
         { type:'span', text:'(ไม่ต้องกดปุ่ม)', color:MUTE },
       ]},
