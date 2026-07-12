@@ -153,8 +153,11 @@ const bubble = (headerName: string, b: any, f?: any) => {
   if (f) o.footer = f;
   return o;
 };
+// Bottom "แก้ไขข้อมูล" button — always solid black per the design (cards 2/3/5).
+// Opens the web app when LIFF_EDIT_URL is set; otherwise a postback that echoes
+// the web-app link (never the old white outline fallback).
 const editFooter = (url?: string, id?: string) => ({ type:'box', layout:'vertical', paddingStart:'20px', paddingEnd:'20px', paddingBottom:'18px',
-  contents:[ url ? primaryBtn('แก้ไขข้อมูล', { uri:url }) : outlineBtn('ยกเลิก / แก้ไข', { data:`action=void&id=${id}` }) ] });
+  contents:[ solidBtn('แก้ไขข้อมูล', url ? { uri:url } : { data:`action=view&id=${id}` }) ] });
 
 // ==================================================================== BUILDERS
 // CARD 1 — ขอหลักฐาน (expense)
