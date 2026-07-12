@@ -59,7 +59,7 @@ function headerBox(name: string) {
       pill,
       { type:'filler' }, // pushes the eyebrow+title group to the bottom edge (reliable on LINE)
       { type:'box', layout:'vertical', spacing:'none', contents:[
-        { type:'text', text:s.eyebrow, color:'#FFFFFFCC', size:'xs', weight:'bold' },
+        { type:'text', text:s.eyebrow, color:'#FFFFFFCC', size:'xs', weight:'bold', offsetTop:'7px' },
         { type:'text', text:s.title, color:'#FFFFFF', weight:'bold', size:'xxl', wrap:false },
       ]},
     ]};
