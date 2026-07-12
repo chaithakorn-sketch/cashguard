@@ -95,16 +95,22 @@ function balanceRow(label: string, value: string | number, color = INK) {
       { type:'text', text:baht(Number(value)), size:'xl', weight:'bold', color, align:'end', gravity:'center' },
     ]};
 }
-// evidence chip — green (has receipt) or amber (none)
+// evidence chip — green w/ receipt icon (card 2) or amber w/ dot (card 3), per design
 function evidenceChip(has: boolean) {
   if (has) return { type:'box', layout:'horizontal', margin:'14px', backgroundColor:PANEL, cornerRadius:'11px',
-    paddingTop:'9px', paddingBottom:'9px', paddingStart:'11px', paddingEnd:'11px', alignItems:'center', spacing:'sm', contents:[
+    paddingTop:'9px', paddingBottom:'9px', paddingStart:'11px', paddingEnd:'11px', alignItems:'center', spacing:'md', contents:[
+      // rounded tile with a small receipt outline inside (design's evidence icon)
+      { type:'box', layout:'vertical', width:'34px', height:'34px', backgroundColor:'#e7ebf1', cornerRadius:'8px',
+        justifyContent:'center', alignItems:'center', flex:0, contents:[
+          { type:'box', layout:'vertical', width:'15px', height:'11px', borderColor:'#9aa3b0', borderWidth:'2px', cornerRadius:'2px', contents:[ { type:'filler' } ] },
+        ]},
       { type:'text', text:'แนบใบเสร็จแล้ว', size:'sm', color:'#5c5c66', weight:'bold', flex:1, gravity:'center' },
       { type:'text', text:'มีหลักฐาน', size:'xs', color:GREEN, weight:'bold', align:'end', gravity:'center', flex:0 },
     ]};
   return { type:'box', layout:'horizontal', margin:'14px', backgroundColor:'#fff8ec', borderColor:'#f4e2bd', borderWidth:'1px',
     cornerRadius:'11px', paddingTop:'10px', paddingBottom:'10px', paddingStart:'12px', paddingEnd:'12px', alignItems:'center', spacing:'sm', contents:[
-      { type:'text', text:'บันทึกโดยไม่มีหลักฐาน', size:'sm', color:'#8a6410', weight:'bold', gravity:'center' },
+      { type:'box', layout:'vertical', width:'7px', height:'7px', backgroundColor:'#c9820a', cornerRadius:'4px', flex:0, contents:[ { type:'filler' } ] },
+      { type:'text', text:'บันทึกโดยไม่มีหลักฐาน', size:'sm', color:'#7a5a12', weight:'bold', gravity:'center' },
     ]};
 }
 function recentList(title: string, items: { label: string; amount: number }[], kind: 'out' | 'in') {
@@ -316,55 +322,6 @@ export function flexSuspiciousSlip(e:{id:string, amount:number, item:string, rea
         { type:'text', text:e.reason, size:'sm', color:'#7a5a12', weight:'bold', wrap:true } ]},
       ...(e.balance != null ? [SEP, balanceRow('ยอดคงเหลือ', String(e.balance))] : []),
       btnRow([ outlineBtn('ดูรายละเอียด', { data:`action=view&id=${e.id}` }), solidBtn('ยืนยันเอง', { data:`action=use_typed&id=${e.id}` }) ]),
-    ]));
-}
-
-// ---------- kept / auxiliary builders (restyled to 3b) ----------
-// Generic flagged card (non-slip flags: over cap, cross branch, off hours, etc.)
-export function flexFlagged(e:{id:string, amount:number, item:string, reason:string, evidence:string, who:string, balance:number}) {
-  return bubble('suspicious',
-    bodyBox([
-      captionRow(`${e.item || 'รายการ'} · ${e.who}`),
-      amount(e.amount, 'out'),
-      { type:'box', layout:'horizontal', margin:'md', backgroundColor:'#fff8ec', borderColor:'#f4e2bd', borderWidth:'1px', cornerRadius:'11px', paddingAll:'11px', contents:[
-        { type:'text', text:e.reason, size:'sm', color:'#7a5a12', weight:'bold', wrap:true } ]},
-      kv('หลักฐาน', e.evidence),
-      SEP,
-      balanceRow('ยอดคงเหลือ', String(e.balance)),
-    ]),
-    editFooter(undefined, e.id));
-}
-// OCR-vs-typed mismatch
-export function flexOcrMismatch(e:{id:string, typed:number, ocr:number}) {
-  return bubble('suspicious',
-    bodyBox([
-      captionRow('โปรดยืนยันยอดที่ถูกต้อง'),
-      amount(e.typed, 'neutral'),
-      kv('พิมพ์มา', baht(e.typed)),
-      kv('OCR อ่านบิล', baht(e.ocr)),
-      btnRow([ outlineBtn(`ใช้ ${baht(e.ocr)}`, { data:`action=use_ocr&id=${e.id}` }), solidBtn(`ใช้ ${baht(e.typed)}`, { data:`action=use_typed&id=${e.id}` }) ]),
-    ]));
-}
-// Low-balance alert
-export function flexLowBalance(e:{empId:string, who:string, balance:number, owed:number}) {
-  return bubble('expired',
-    bodyBox([
-      captionRow(e.who),
-      amount(e.balance, 'neutral'),
-      kv('สำรองจ่ายค้าง', baht(e.owed)),
-      btnRow([ primaryBtn('เติมเงินด่วน', { data:`action=topup_urgent&emp=${e.empId}` }) ]),
-    ]));
-}
-// Customer refund
-export function flexCustomerRefund(e:{amount:number, reason:string, by:string, branch:string, balance:number}) {
-  return bubble('group-expense',
-    bodyBox([
-      captionRow('ไม่นับเป็นต้นทุนร้าน'),
-      amount(e.amount, 'out'),
-      kv('เหตุผล', e.reason),
-      kv('ผู้ทำรายการ', `${e.by} · ${e.branch}`),
-      SEP,
-      balanceRow('ยอดคงเหลือ', String(e.balance)),
     ]));
 }
 // Draft confirm (kept for compat; the new flow auto-saves so this is rarely shown)

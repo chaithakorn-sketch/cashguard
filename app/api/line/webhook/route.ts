@@ -5,9 +5,7 @@ import {
   draftForNewInput, openAnyDraft, draftAwaitingAmount, attachReceipt, setAmount,
   setEvidenceNone, isReady, touch, newTopup, recentEntries, recentFinalizedEntry, receiptCount,
 } from '@/lib/draft-engine';
-import { computeFlags } from '@/lib/flags';
 import { balanceFor } from '@/lib/ledger';
-import { runOcr } from '@/lib/ocr';
 import { pHash, findDuplicate, hamming } from '@/lib/phash';
 import { uploadReceipt, signedUrl } from '@/lib/storage';
 import { parseText } from '@/lib/parse';
@@ -178,16 +176,15 @@ async function handleImage(ev: any, userId: string, branch: any) {
 
   const { buf, contentType } = await getMessageContent(ev.message.id);
   const hash = await pHash(buf);
-  const ocr = await runOcr(buf); // before the dup check so the amount can disambiguate look-alike slips
 
   // Perceptual duplicate (expense receipts only; top-up slips rely on Slip2Go's own dup check).
   if (draft.type === 'expense') {
-    const dup = await findDuplicate(hash, 6, 60, ocr.amount ?? draft.amount ?? null);
+    const dup = await findDuplicate(hash, 6, 60, draft.amount ?? null);
     if (dup) {
       const prev: any = (dup as any).entries;
       return reply(ev.replyToken, [flexMessage('ตรวจพบรูปซ้ำ', flex.flexRejectedDuplicate({
         id: draft.id,
-        amount: ocr.amount ?? draft.amount ?? prev?.amount ?? 0,
+        amount: draft.amount ?? prev?.amount ?? 0,
         prevDate: prev?.submitted_at ? new Date(prev.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '-',
         prevBy: '-',
         prevItem: prev?.vendor ?? prev?.description ?? '-',
@@ -196,26 +193,22 @@ async function handleImage(ev: any, userId: string, branch: any) {
   }
 
   const path = await uploadReceipt(draft.id, buf, contentType);
-  await attachReceipt(draft.id, path, hash, ocr.raw, ocr.amount, ocr.evidenceType);
+  // No OCR: a top-up photo is a transfer slip, an expense photo is a receipt.
+  const evidenceType = draft.type === 'topup' ? 'transfer_slip' : 'receipt';
+  await attachReceipt(draft.id, path, hash, null, null, evidenceType);
 
-  // Slip verification (top-ups + anything OCR calls a transfer slip). Best-effort;
+  // Slip verification (top-ups only, per the 13-card design — card 13). Best-effort;
   // Slip2Go needs a fetchable url, so we hand it a short-lived signed url.
   let slip: SlipResult | null = null;
-  if (draft.type === 'topup' || ocr.evidenceType === 'transfer_slip') {
+  if (draft.type === 'topup') {
     const url = await signedUrl(path, 600);
     if (url) {
-      slip = await verifySlip(url, draft.amount ?? ocr.amount ?? null);
+      slip = await verifySlip(url, draft.amount ?? null);
       await sb.from('receipts').update({
         slip_status: slip.status, slip_ref: slip.transRef, slip_raw: slip.raw, slip_checked_at: new Date().toISOString(),
       }).eq('image_url', path);
     }
   }
-
-  // OCR autofill (vendor always; amount only when the payer hasn't typed one).
-  const patch: any = {};
-  if (ocr.vendor) patch.vendor = ocr.vendor;
-  if (ocr.amount != null && draft.amount == null) patch.amount = ocr.amount;
-  if (Object.keys(patch).length) await setAmount(draft.id, patch);
 
   const e = unwrap(await sb.from('entries').select('*').eq('id', draft.id).single(), 'handleImage.refetch');
   if (e.amount == null) {
@@ -223,14 +216,7 @@ async function handleImage(ev: any, userId: string, branch: any) {
     return reply(ev.replyToken, [{ type: 'text', text: 'รับรูปแล้ว พิมพ์ยอดด้วยครับ เช่น “ค่าน้ำมัน 100”' }]);
   }
 
-  // OCR-vs-typed mismatch (expense): the payer's own typo — ask before saving.
-  if (e.type === 'expense' && e.ocr_verified && e.ocr_amount != null) {
-    const ok = Math.abs(Number(e.amount) - Number(e.ocr_amount)) <= Math.max(5, Number(e.ocr_amount) * 0.02);
-    if (!ok) return reply(ev.replyToken, [flexMessage('ยอดไม่ตรงบิล',
-      flex.flexOcrMismatch({ id: e.id, typed: Number(e.amount), ocr: Number(e.ocr_amount) }))]);
-  }
-
-  // Evidence present -> save now (a suspicious slip is recorded + flagged, not blocked).
+  // Evidence present -> save now. A suspicious TOP-UP slip is recorded + shown as card 13.
   return finalizeEntry(ev, e.id, { slip });
 }
 
@@ -244,10 +230,9 @@ async function attachExtraPhoto(ev: any, entry: any) {
     return reply(ev.replyToken, [{ type: 'text', text: 'รูปนี้แนบให้รายการนี้ไปแล้วครับ' }]);
   }
   const path = await uploadReceipt(entry.id, buf, contentType);
-  const ocr = await runOcr(buf);
-  unwrap(await sb.from('receipts').insert({ entry_id: entry.id, image_url: path, phash: hash, ocr_raw: ocr.raw }), 'attachExtraPhoto.insert');
+  unwrap(await sb.from('receipts').insert({ entry_id: entry.id, image_url: path, phash: hash }), 'attachExtraPhoto.insert');
   // A slip on a top-up still gets verified (fraud check), best-effort.
-  if (entry.type === 'topup' || ocr.evidenceType === 'transfer_slip') {
+  if (entry.type === 'topup') {
     const url = await signedUrl(path, 600);
     if (url) {
       const slip = await verifySlip(url, entry.amount ?? null);
@@ -278,13 +263,7 @@ async function handlePostback(ev: any) {
       await setEvidenceNone(id);
       return finalizeEntry(ev, id);
     case 'confirm':
-      return finalizeEntry(ev, id);
-    case 'use_ocr': {
-      const { data: e } = await sb.from('entries').select('ocr_amount').eq('id', id).single();
-      if (e?.ocr_amount != null) await setAmount(id, { amount: Number(e.ocr_amount) });
-      return finalizeEntry(ev, id);
-    }
-    case 'use_typed':
+    case 'use_typed': // card 13 "ยืนยันเอง" — accept the typed amount as-is
       return finalizeEntry(ev, id);
     case 'second_installment':
       return finalizeEntry(ev, id, { allowDuplicate: true });
@@ -321,34 +300,29 @@ async function finalizeEntry(ev: any, id: string, opts: { allowDuplicate?: boole
   const { data: emp } = await sb.from('employees').select('*').eq('id', e.payer_id).maybeSingle();
   const { data: br } = await sb.from('branches').select('*').eq('id', e.branch_id).maybeSingle();
 
-  const flags = e.type === 'topup' ? [] : await computeFlags(e);
+  // Per the 13-card design there is NO generic "risk flag" card. Expenses always
+  // show the success card (card 2 with evidence / card 3 without). The only flagged
+  // path is a suspicious TOP-UP slip -> card 13.
+  const flags: { kind: string; detail: string }[] = [];
   if (opts.slip && (opts.slip.status === 'fail' || opts.slip.status === 'warning')) {
-    flags.push({ kind: 'slip_invalid' as any, detail: opts.slip.note || 'สลิปไม่ผ่านการตรวจ' });
+    flags.push({ kind: 'slip_invalid', detail: opts.slip.note || 'สลิปไม่ผ่านการตรวจ' });
   }
-  const filtered = opts.allowDuplicate ? flags.filter(f => f.kind !== 'duplicate') : flags;
 
-  const status = unwrap(await sb.rpc('confirm_entry', {
-    p_entry_id: id, p_flags: filtered, p_actor: e.payer_id ?? 'system',
+  unwrap(await sb.rpc('confirm_entry', {
+    p_entry_id: id, p_flags: flags, p_actor: e.payer_id ?? 'system',
   }), 'confirm_entry.rpc');
 
   const bal = await balanceFor(e.payer_id);
   const recent = (await recentEntries(e.payer_id, e.type === 'topup' ? 'topup' : 'expense')).map(recentLabel);
   const editUrl = editUrlFor(e.id);
 
-  const slipFlag = filtered.find(f => f.kind === 'slip_invalid');
+  const slipFlag = flags.find(f => f.kind === 'slip_invalid');
   let card: any;
   if (slipFlag) {
-    // สลิปน่าสงสัย (card 13) — recorded but flagged; owner alerted below.
+    // สลิปน่าสงสัย (card 13) — top-up recorded but flagged; owner alerted below.
     card = flexMessage('พบสลิปน่าสงสัย', flex.flexSuspiciousSlip({
-      id: e.id, amount: Number(e.amount), item: e.description ?? e.vendor ?? '-',
+      id: e.id, amount: Number(e.amount), item: e.description ?? e.vendor ?? 'เติมเงิน',
       reason: slipFlag.detail, who: emp?.nickname ?? '-', balance: bal,
-    }));
-  } else if (status === 'flagged') {
-    card = flexMessage('รอตรวจสอบ', flex.flexFlagged({
-      id: e.id, amount: Number(e.amount), item: e.description ?? e.vendor ?? '-',
-      reason: filtered[0]?.detail ?? 'ตรวจสอบ',
-      evidence: e.evidence_type === 'none' ? 'ไม่มีบิล' : 'มีบิล',
-      who: emp?.nickname ?? '-', balance: bal,
     }));
   } else if (e.type === 'topup') {
     card = flexMessage('เติมเงินแล้ว', flex.flexTopup({
@@ -365,5 +339,5 @@ async function finalizeEntry(ev: any, id: string, opts: { allowDuplicate?: boole
   }
 
   await reply(ev.replyToken, [card]);
-  if (status === 'flagged' && process.env.ADMIN_GROUP_ID) await push(process.env.ADMIN_GROUP_ID, [card]);
+  if (slipFlag && process.env.ADMIN_GROUP_ID) await push(process.env.ADMIN_GROUP_ID, [card]);
 }

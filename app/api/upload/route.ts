@@ -3,7 +3,6 @@ import { sb, unwrap } from '@/lib/supabase';
 import { resolveLiffUser } from '@/lib/liff';
 import { uploadReceipt, signedUrl } from '@/lib/storage';
 import { pHash } from '@/lib/phash';
-import { runOcr } from '@/lib/ocr';
 
 export const runtime = 'nodejs';
 
@@ -25,17 +24,15 @@ export async function POST(req: NextRequest) {
   const contentType = file.type || 'image/jpeg';
   const path = await uploadReceipt(entryId, buf, contentType);
   const hash = await pHash(buf);
-  const ocr = await runOcr(buf);
 
   unwrap(
-    await sb.from('receipts').insert({ entry_id: entryId, image_url: path, phash: hash, ocr_raw: ocr.raw }),
+    await sb.from('receipts').insert({ entry_id: entryId, image_url: path, phash: hash }),
     'upload.insertReceipt'
   );
-  if (ocr.evidenceType) {
-    await sb.from('entries').update({ evidence_type: ocr.evidenceType, updated_at: new Date().toISOString() }).eq('id', entryId);
-  }
+  // A photo attached in the web app is a receipt (no OCR).
+  await sb.from('entries').update({ evidence_type: 'receipt', updated_at: new Date().toISOString() }).eq('id', entryId);
 
-  return NextResponse.json({ path, url: await signedUrl(path, 3600), ocr_amount: ocr.amount ?? null });
+  return NextResponse.json({ path, url: await signedUrl(path, 3600) });
 }
 
 // DELETE /api/upload?receipt_id=<uuid>  -> remove a receipt from an owned entry.
