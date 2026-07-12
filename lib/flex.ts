@@ -54,7 +54,7 @@ function headerBox(name: string) {
   ]};
   const overlay = { type:'box', layout:'vertical', position:'absolute',
     offsetTop:'0px', offsetStart:'0px', offsetEnd:'0px', offsetBottom:'0px',
-    paddingTop:'14px', paddingBottom:'14px', paddingStart:'18px', paddingEnd:'18px', justifyContent:'space-between',
+    paddingTop:'14px', paddingBottom:'7px', paddingStart:'18px', paddingEnd:'18px', justifyContent:'space-between',
     contents:[
       pill,
       { type:'box', layout:'vertical', spacing:'none', contents:[
@@ -127,12 +127,12 @@ const act = (a: { data?: string; uri?: string }, label: string) =>
 const primaryBtn = (label: string, a: { data?: string; uri?: string }, color = INK) =>
   ({ type:'button', style:'primary', color, height:'sm', action:act(a, label) });
 const outlineBtn = (label: string, a: { data?: string; uri?: string }) =>
-  ({ type:'box', layout:'vertical', flex:1, backgroundColor:'#FFFFFF', borderColor:INK, borderWidth:'2px', cornerRadius:'12px',
+  ({ type:'box', layout:'vertical', flex:1, backgroundColor:'#FFFFFF', borderColor:INK, borderWidth:'1px', cornerRadius:'12px',
      contents:[{ type:'button', style:'link', color:INK, height:'sm', action:act(a, label) }] });
 const ghostBtn = (label: string, a: { data?: string; uri?: string }) =>
   ({ type:'box', layout:'vertical', flex:1, backgroundColor:'#f1f1f3', cornerRadius:'12px',
      contents:[{ type:'button', style:'link', color:GRAY, height:'sm', action:act(a, label) }] });
-const btnRow = (b: any[]) => ({ type:'box', layout:'horizontal', spacing:'md', margin:'16px', contents:b });
+const btnRow = (b: any[]) => ({ type:'box', layout:'horizontal', spacing:'lg', margin:'16px', contents:b });
 const bodyBox = (contents: any[]) => ({ type:'box', layout:'vertical', paddingAll:'20px', contents });
 // bubble(headerName, body, footer) — headerName picks the baked hero image.
 const bubble = (headerName: string, b: any, f?: any) => {
@@ -152,7 +152,7 @@ export function flexAskEvidence(e:{id:string, amount:number, category:string}) {
       captionRow(e.category || 'ค่าใช้จ่าย'),
       amount(e.amount, 'neutral'),
       SEP,
-      { type:'text', margin:'lg', size:'sm', wrap:true, contents:[
+      { type:'text', margin:'lg', size:'xs', wrap:true, contents:[
         { type:'span', text:'ส่งรูปใบเสร็จเพื่อบันทึกได้เลยครับ ', color:'#5c5c66' },
         { type:'span', text:'(ไม่ต้องกดปุ่ม)', color:MUTE },
       ]},
