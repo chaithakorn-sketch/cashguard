@@ -27,7 +27,7 @@ const cammoH = 158 * S;
 for (const { pose, right } of POSES) {
   const cx = W - (right * S) - cammoH; // square cammo => width == height
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}">
-  <rect width="100%" height="100%" fill="#DA1B27"/>
+  <rect width="100%" height="100%" fill="#E5242F"/>
   <image xlink:href="${cammo(pose)}" x="${cx}" y="${-2 * S}" height="${cammoH}" width="${cammoH}"/>
 </svg>`;
   await sharp(Buffer.from(svg)).resize(1080).png({ compressionLevel: 9, quality: 88 }).toFile(`${OUT}/bg-${pose}.png`);
