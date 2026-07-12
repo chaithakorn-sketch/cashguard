@@ -37,7 +37,7 @@ const editUrlFor = (id: string) =>
   EDIT_URL ? `${EDIT_URL}${EDIT_URL.includes('?') ? '&' : '?'}entry=${id}` : undefined;
 
 function recentLabel(x: any) {
-  const d = new Date(x.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  const d = new Date(x.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' });
   const name = x.type === 'topup' ? 'เติมเงิน' : (x.vendor || x.category || x.description || 'รายการ');
   return { label: `${name} · ${d}`, amount: Number(x.amount || 0) };
 }
@@ -185,7 +185,7 @@ async function handleImage(ev: any, userId: string, branch: any) {
       return reply(ev.replyToken, [flexMessage('ตรวจพบรูปซ้ำ', flex.flexRejectedDuplicate({
         id: draft.id,
         amount: draft.amount ?? prev?.amount ?? 0,
-        prevDate: prev?.submitted_at ? new Date(prev.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '-',
+        prevDate: prev?.submitted_at ? new Date(prev.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' }) : '-',
         prevBy: '-',
         prevItem: prev?.vendor ?? prev?.description ?? '-',
       }))]);
@@ -327,13 +327,13 @@ async function finalizeEntry(ev: any, id: string, opts: { allowDuplicate?: boole
   } else if (e.type === 'topup') {
     card = flexMessage('เติมเงินแล้ว', flex.flexTopup({
       id: e.id, amount: Number(e.amount), payer: emp?.nickname ?? emp?.name ?? '-', branch: br?.name ?? '-',
-      balance: bal, round: new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }), recent, editUrl,
+      balance: bal, round: new Date().toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' }), recent, editUrl,
     }));
   } else {
     card = flexMessage('บันทึกแล้ว', flex.flexExpenseSuccess({
       id: e.id, amount: Number(e.amount), vendor: e.vendor ?? 'ไม่ระบุ', category: e.category ?? 'อื่นๆ',
       payer: emp?.nickname ?? emp?.name ?? '-', branch: br?.name ?? '-', balance: bal,
-      when: new Date().toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+      when: new Date().toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' }),
       evidence: e.evidence_type ?? undefined, recent, editUrl,
     }));
   }

@@ -195,7 +195,7 @@ export function flexTopupAskSlip(e:{id:string, amount:number}) {
       captionRow('ยอดเติมเงิน'),
       amount(e.amount, 'neutral'),
       SEP,
-      { type:'text', margin:'lg', size:'sm', wrap:true, contents:[
+      { type:'text', margin:'lg', size:'xxs', wrap:true, contents:[
         { type:'span', text:'ส่งรูปสลิปโอนเงินเพื่อยืนยันการเติม ', color:'#5c5c66' },
         { type:'span', text:'(ส่งรูปได้เลย ไม่ต้องกดปุ่ม)', color:MUTE },
       ]},
@@ -210,7 +210,7 @@ export function flexTopup(e:{id?:string, amount:number, payer:string, branch:str
       amount(e.amount, 'in'),
       kv('วันที่เติม', e.round),
       SEP,
-      balanceRow('ยอดคงเหลือ', String(e.balance), GREEN),
+      balanceRow('ยอดคงเหลือ', String(e.balance)),
       recentList('3 รายการเติมเงินล่าสุด', e.recent || [], 'in'),
     ]),
     editFooter(e.editUrl, e.id));
