@@ -156,6 +156,7 @@ export default function EditApp() {
         {!isTopup && (
           <Field label="หมวด">
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, background: '#eef0f2', borderRadius: 12, padding: '12px 14px' }}>
+              <div style={{ width: 30, height: 30, borderRadius: 9, background: '#FBE9EA', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Ico.Cam s={RED} /></div>
               <span style={{ fontSize: 14.5, fontWeight: 700, color: '#3a3a42' }}>{entry?.category || 'อื่นๆ'}</span>
               <span style={{ marginLeft: 'auto' }}><Ico.Lock /></span>
             </div>
@@ -320,6 +321,8 @@ function Loading() {
   );
 }
 function Success({ msg, onLine, onList }: { msg: string; onLine: () => void; onList: () => void }) {
+  // Auto-return to LINE after a beat (design w6: "กำลังกลับสู่ LINE…").
+  useEffect(() => { const t = setTimeout(onLine, 2400); return () => clearTimeout(t); }, [onLine]);
   return (
     <Shell>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '40px 32px' }}>
@@ -329,11 +332,16 @@ function Success({ msg, onLine, onList }: { msg: string; onLine: () => void; onL
         <div style={{ fontSize: 22, fontWeight: 800, color: INK, marginBottom: 10 }}>บันทึกสำเร็จ</div>
         <div style={{ fontSize: 14, color: '#5c5c66', lineHeight: 1.5, marginBottom: 4 }}>{msg}</div>
         <div style={{ fontSize: 12.5, color: MUTE, lineHeight: 1.5 }}>ระบบแจ้งกลุ่มแบบ ก่อน → หลัง อัตโนมัติ</div>
+        <div style={{ fontSize: 12.5, color: MUTE, marginTop: 18, display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #d7d7dd', borderTopColor: GRAY, display: 'inline-block', animation: 'cgspin .9s linear infinite' }} />
+          กำลังกลับสู่ LINE…
+        </div>
       </div>
       <div style={{ flex: 'none', padding: '12px 16px 26px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <button onClick={onLine} style={{ ...btn.save, flex: 'unset' }}>กลับไปที่ LINE</button>
+        <button onClick={onLine} style={{ ...btn.save, flex: 'unset' }}>กลับไปที่ LINE ตอนนี้</button>
         <button onClick={onList} style={{ ...btn.cancel, flex: 'unset' }}>ดูรายการของฉัน</button>
       </div>
+      <style>{`@keyframes cgspin{to{transform:rotate(360deg)}}`}</style>
     </Shell>
   );
 }
